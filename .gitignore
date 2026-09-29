@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.DS_Store
+.env
+.env.*
+coverage.xml
+.coverage
+dependency-report.json
+
+# Downloaded by initialization; vendor.lock.json records versions and hashes.
+scripts/mermaid.min.js
+scripts/highlight.min.js
+scripts/hljs-styles/
