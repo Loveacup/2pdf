@@ -1785,7 +1785,7 @@ def _bootstrap_venv():
     probe = (
         "import importlib.metadata as m,json,sys; from pathlib import Path; "
         "expected=Path(sys.argv[1]).resolve(); "
-        "cfg=dict(line.split('=',1) for line in (expected/'pyvenv.cfg').read_text().splitlines() if '=' in line)\n"
+        "cfg={k.strip():v.strip() for k,v in (line.split('=',1) for line in (expected/'pyvenv.cfg').read_text().splitlines() if '=' in line)}\n"
         "if (Path(sys.prefix).resolve()!=expected or sys.prefix==sys.base_prefix "
         "or cfg.get('include-system-site-packages','true').strip().lower()!='false'):\n"
         " raise SystemExit(3)\n"

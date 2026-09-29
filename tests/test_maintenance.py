@@ -36,6 +36,32 @@ def test_init_refuses_nonvenv_without_mutation(tmp_path, monkeypatch):
     assert marker.read_bytes() == b"preserve"
 
 
+def test_bootstrap_reuses_isolated_environment_without_upgrading(tmp_path, monkeypatch):
+    import subprocess
+    import venv
+    import md2pdf_chrome as renderer
+
+    target = tmp_path / "environment"
+    venv.EnvBuilder(with_pip=False).create(target)
+    python = target / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    site = Path(subprocess.check_output(
+        [str(python), "-I", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
+        text=True).strip())
+    for name in ("markdown", "pypdf", "PyYAML", "css-inline"):
+        dist = site / (name.replace("-", "_") + "-1.0.dist-info")
+        dist.mkdir()
+        (dist / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n")
+    monkeypatch.setattr(renderer, "VENV_DIR", target)
+    run = subprocess.run
+
+    def no_installer(command, **kwargs):
+        assert "pip" not in command
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(renderer.subprocess, "run", no_installer)
+    assert renderer._bootstrap_venv() == python
+
+
 def test_metadata_failure_is_unavailable_and_nonzero(capsys):
     current = {name: "1.0.0" for name in maintenance.PYTHON_PACKAGES}
     current.update({"mermaid": "1.0.0", "highlight.js": "1.0.0", "playwright": "1.0.0"})
