@@ -243,14 +243,14 @@ def _venv_python():
 def get_mermaid_src():
     """Return mermaid script src — local pinned copy if available, else pinned CDN."""
     if MERMAID_LOCAL.exists():
-        return f"file://{MERMAID_LOCAL}"
+        return MERMAID_LOCAL.resolve().as_uri()
     return MERMAID_CDN
 
 
 def _hljs_js_src():
     """highlight.js 脚本地址：本地 pin 副本优先（--setup 下载），否则 pinned CDN。"""
     if HLJS_LOCAL.exists():
-        return f"file://{HLJS_LOCAL}"
+        return HLJS_LOCAL.resolve().as_uri()
     return HLJS_CDN
 
 
@@ -260,7 +260,7 @@ def _hljs_css_src(theme):
     name = _lt(theme).hljs_theme
     local = HLJS_STYLES_DIR / f"{name}.min.css"
     if local.exists():
-        return f"file://{local}"
+        return local.resolve().as_uri()
     return f"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@{HLJS_PIN}/build/styles/{name}.min.css"
 
 
@@ -1144,7 +1144,7 @@ def _localize_mermaid_src(html):
 
     html = re.sub(
         r'<script src="https://cdn\.jsdelivr\.net/npm/mermaid[^"]*"',
-        f'<script src="file://{MERMAID_LOCAL}"',
+        lambda _match: f'<script src="{MERMAID_LOCAL.resolve().as_uri()}"',
         html,
     )
     return html
@@ -1180,7 +1180,7 @@ class _NeedPandoc(Exception):
 def _node_env():
     """803/1094 重复的 NODE_PATH 拼装，去重。"""
     env = dict(os.environ)
-    extra = ":".join(
+    extra = os.pathsep.join(
         str(p) for p in [Path.home() / "node_modules", Path("/usr/local/lib/node_modules")]
         if p.exists()
     )
@@ -1345,10 +1345,10 @@ const {{ chromium }} = require('playwright');
 (async () => {{
   const browser = await {launch_expr};
   const page = await browser.newPage();
-  await page.goto('file://{html_path}', {{ waitUntil: 'networkidle', timeout: 120000 }});
+  await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
   await page.pdf({{
-    path: '{pdf_path}',
+    path: {json.dumps(str(pdf_path.resolve()))},
     {pw_format},
     printBackground: true,
     margin: {{ {pdf_margin} }},
@@ -1733,7 +1733,7 @@ def _render_pandoc_fallback(md_path, pdf_path, theme="auto", page_size="A4"):
         subprocess.run(
             [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
              f"--user-data-dir={tmp}/profile", "--no-pdf-header-footer",
-             f"--print-to-pdf={pdf_path}", f"file://{html}"],
+             f"--print-to-pdf={pdf_path}", html.resolve().as_uri()],
             check=True, timeout=180, capture_output=True,
         )
         if not pdf_path.exists() or pdf_path.stat().st_size < 1024:
@@ -1923,8 +1923,8 @@ def run_setup():
         failures.append("node")
     elif not _bundled_launchable():
         print("  📥 安装 playwright chromium（首次较慢，数百 MB）...")
-        r = subprocess.run(["npx", "-y", "playwright", "install", "chromium"],
-                           env=_node_env(), text=True)
+        r = subprocess.run([shutil.which("npx"), "-y", "playwright", "install", "chromium"],
+                           env=_node_env(), text=True, shell=(sys.platform == "win32"))
         if _bundled_launchable():
             print("  ✅ playwright chromium 就绪")
         elif _find_system_chrome():
@@ -2189,7 +2189,19 @@ def output_path_for(md_path, fmt, out_path=None):
 def inline_css(html):
     """将 <style> 中的 CSS 内联到元素 style 属性，便于微信粘贴。"""
     import css_inline  # 延迟导入，缺失时不影响模块导入
+    from urllib.parse import urlsplit
+    from urllib.request import url2pathname
 
+    # css_inline's native loader does not decode Windows file URIs correctly.
+    # Embed local styles first; the same URI decoding also works on macOS.
+    def embed_local_style(match):
+        uri = urlsplit(match.group(1))
+        raw_path = ("//" + uri.netloc if uri.netloc else "") + uri.path
+        css = Path(url2pathname(raw_path)).read_text(encoding="utf-8")
+        return "<style>" + css + "</style>"
+
+    html = re.sub(r'''<link\b(?=[^>]*\brel=["']stylesheet["'])[^>]*\bhref=["'](file:[^"']*)["'][^>]*>''',
+                  embed_local_style, html, flags=re.IGNORECASE)
     return css_inline.inline(html)
 
 
@@ -2213,7 +2225,7 @@ def _render_playwright_output(html_path, out_path, fmt, page_size="A4", browser=
     if fmt == "png":
         action = f"""
   await page.setViewportSize({{ width: {view_w}, height: 1000 }});
-  await page.screenshot({{ path: '{out_path}', fullPage: true, type: 'png' }});"""
+  await page.screenshot({{ path: {json.dumps(str(out_path.resolve()))}, fullPage: true, type: 'png' }});"""
     else:
         # html / wechat：取完整渲染后的 DOM，写到 stdout（base64）由 Python 落盘
         action = """
@@ -2233,7 +2245,7 @@ const {{ chromium }} = require('playwright');
 (async () => {{
   const browser = await {launch_expr};
   const page = await browser.newPage();
-  await page.goto('file://{html_path}', {{ waitUntil: 'networkidle', timeout: 120000 }});
+  await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {common_wait}
 {action}
   await browser.close();

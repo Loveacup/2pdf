@@ -11,7 +11,7 @@ import md2pdf_chrome as m  # noqa: E402
 
 def test_venv_python_posix():
     with mock.patch.object(sys, "platform", "darwin"):
-        assert str(m._venv_python()).endswith("bin/python")
+        assert m._venv_python().parts[-2:] == ("bin", "python")
 
 
 def test_venv_python_windows():

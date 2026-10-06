@@ -255,7 +255,8 @@ def _nonempty_nonvenv() -> bool:
 def _preflight_status() -> dict[str, str] | None:
     try:
         result = subprocess.run([sys.executable, str(RENDERER), "--preflight", "--json"],
-                                capture_output=True, text=True, timeout=30, check=False)
+                                capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
+                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         report = json.loads(result.stdout)
         checks = report.get("checks")
         if not isinstance(checks, list):
