@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### P1 — 字体
+
+- **Improved（CR03, CR09）**：全格式等待 fonts.ready，按文本节点采集 CDP 实际字体、PostScript 名、glyphCount/fallback；LastResort/notdef 缺字终止，macOS 另查实际字体 CoreText glyph IDs；FONT_REPORT 记录检查范围及限制，不把 CSS 栈/ready 当命中证明。
+- **Preserved（CR01–CR13）**：不打包或强制下载系统字体、不改字体栈、不升级依赖；P0 安全/原子交付和分页/表格合同保持。
+- **Confirmed（CR03, CR09）**：macOS 的中日韩、全角标点、emoji、上下标页面无缺字方框，记录 SF NS、PingFang SC、Noto Sans SC、Apple Color Emoji；缺字样本失败无产物，普通文档仍 1 页。Windows 未运行、明确未验收；CDP/cmap 不替代最终视觉核查。
+- **Confirmed（CR03–CR12）**：完整套件 169 passed，含全格式既有回归、实际字体记录和缺字失败集成用例。
+
 ### P1 — 表格
 
 - **Improved（CR04, CR08）**：取消按列数缩至 9px 的策略；A4 保留语义表格、所有列/单元格和可读字号，固定页宽换行、显式重复表头、超长行允许拆分。小于 10px、单元格内宽不足两字宽或横向溢出时定位表/单元格并拒绝交付。

@@ -213,6 +213,19 @@ Styling features in the script:
 
 **WeasyPrint CJK 已知问题**: macOS 上 PingFang SC 等系统字体存于 AssetV2 哈希路径，WeasyPrint/Pango 无法正确嵌入，导致 PDF 中文显示乱码（但 pypdf 提取文本正常）。**务必使用 Chromium 系方案（Playwright bundled 默认，或 `--browser chrome` 用系统 Chrome），不要用 WeasyPrint。**
 
+### P1 actual font evidence
+
+Before every output the renderer waits for `document.fonts.ready`, then uses CDP
+`CSS.getPlatformFontsForNode` on rendered text nodes. `FONT_REPORT` records actual
+family/PostScript names, glyph counts and custom-font use, rather than declaring
+the CSS stack a match. LastResort and rendered notdef comparisons fail on detected
+missing glyphs; macOS also checks CoreText glyph IDs for the actual per-node faces.
+Other platforms retain CDP/notdef diagnostics but require their own visual
+acceptance. This is not a universal proof against a font mapping a character to
+an intentional box glyph. Final page review remains required. No system fonts
+are bundled or downloaded. macOS corpus passed; Windows remains unverified.
+
+
 ## Page Headers/Footers
 
 To add page headers/footers with page numbers, use `scripts/md2pdf_browser.py` (Playwright version) which supports `displayHeaderFooter`.

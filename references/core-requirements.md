@@ -8,7 +8,7 @@
 |---|---|
 | CR01 | **触发边界**：Markdown/Obsidian 排版为 PDF/PNG/HTML/公众号；PDF 合并、拆分、旋转、水印、加密、基础文字/表格提取、简单 OCR、创建 PDF、表单读取与填写。文档→Markdown 结构化解析归 sibling 2md，两技能只交换文件、互不 import。 |
 | CR02 | **执行链独立**：按用户目标选链；排版链、PDF 编辑链、表单链之间不静默互换。图表内容错误不触发引擎降级或 pandoc 救生艇。 |
-| CR03 | **CJK 安全排版**：Chromium 渲染中日韩文字与全角标点不乱码；字体栈覆盖 macOS 与 Windows 常见 CJK 字体，不打包系统字体。 |
+| CR03 | **CJK 安全排版**：Chromium 渲染中日韩文字与全角标点不乱码；字体栈覆盖 macOS 与 Windows 常见 CJK 字体，不打包系统字体、不强制下载。P1 等待 `document.fonts.ready`，通过 CDP 记录实际字体/fallback 与 glyphCount，检测 LastResort/notdef；macOS 另以实际字体 CoreText glyph ID 检查覆盖。字体记录与最终页面视觉共同验收；未跑平台明确未验收，ready/check 不作为字形命中证明。 |
 | CR04 | **Obsidian 语法与资源边界**：26 种 Callout（含折叠）、wikilink、`==高亮==`、任务列表、frontmatter 剥离、本地图片内嵌；缺失、不可读或浏览器解码失败指出源引用并非零退出。P0-B 起默认仅源文件真实父目录，可重复 `--resource-root DIR` 扩大授权；URL 解码、规范化、symlink 解析后检查。本地/远程 HTML、CSS、字体、SVG、iframe 递归冻结，任意文档脚本不执行；默认离线，远程资源须逐来源 `--allow-origin ORIGIN`，每次请求及跳转重新校验，不继承 cookie/profile/认证。代码围栏与行内代码先保护再转换（fence-first）。 |
 | CR05 | **Mermaid 质量门**：使用 pinned 本地 vendor，缺失失败，不在普通转换时下载或回退 CDN；逐块 parse/render，任一失败默认 exit 3、报块号与错误、不产出文件；`--allow-diagram-errors` 是唯一显式豁免。PDF metadata 记录图总数与成功数。 |
 | CR06 | **CLI 合同**：`md_file [pdf_file] [header_text]` 位置参数及格式、主题、尺寸、二次排版、frontmatter、preview、metadata 参数保持。`--verify`、`--verify-strict`、可重复 `--require-text TEXT` 启用 PDF 验收；P0-B 新增可重复 `--resource-root DIR`、`--allow-origin ORIGIN`。`--fallback pandoc` 保留解析但明确拒绝不具相同资源策略的旧救生艇；迁移至 `--browser chrome/auto`。Outline 输出供 agent 二次排版决策。 |

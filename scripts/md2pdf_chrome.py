@@ -27,6 +27,7 @@ from pdf_delivery import staged_pdf, staged_output, run_render_process, Delivery
 from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_html,
                              browser_policy_js, browser_resource_check_js)
 from print_layout import prepare_print_js, print_viewport_js
+from font_readiness import font_check_js, check_font_report
 
 # 支持的输出格式
 VALID_FORMATS = ("pdf", "png", "html", "wechat")
@@ -1309,6 +1310,7 @@ const {{ chromium }} = require('playwright');
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {local_image_check_js()}
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
+{font_check_js()}
 {prepare_print_js(page_size)}
 {browser_resource_check_js()}
   await page.pdf({{
@@ -1340,7 +1342,10 @@ const {{ chromium }} = require('playwright');
             raise ResourceError(result.stderr.strip())
         if result.returncode == 6:
             raise RuntimeError(result.stderr.strip())
+        if result.returncode == 7:
+            raise RuntimeError(result.stderr.strip())
         if result.returncode == 0 and pdf_path.exists() and pdf_path.stat().st_size >= 1024:
+            check_font_report(result.stdout)
             scale_match = re.search(r"MERMAID_SCALE_WARNINGS:(\[[^\n]*\])", result.stdout)
             if scale_match:
                 for item in json.loads(scale_match.group(1)):
@@ -2227,6 +2232,7 @@ const {{ chromium }} = require('playwright');
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {local_image_check_js()}
 {common_wait}
+{font_check_js()}
 {browser_resource_check_js()}
 {action}
   await browser.close();
@@ -2247,6 +2253,8 @@ const {{ chromium }} = require('playwright');
             raise ResourceError(result.stderr.strip())
         if result.returncode == 6:
             raise RuntimeError(result.stderr.strip())
+        if result.returncode == 7:
+            raise RuntimeError(result.stderr.strip())
 
         if fmt in ("html", "wechat"):
             out = result.stdout
@@ -2258,6 +2266,7 @@ const {{ chromium }} = require('playwright');
                 out_path.write_text(content, encoding="utf-8")
 
         if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+            check_font_report(result.stdout)
             return
         last_err = result.stderr
         if idx < len(plan) - 1:

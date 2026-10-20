@@ -70,3 +70,28 @@ def test_unreadable_table_fails_without_overwriting(tmp_path):
     target.write_bytes(b'original accepted output')
     assert render(source, target).returncode != 0
     assert target.read_bytes() == b'original accepted output'
+
+
+@pytest.mark.integration
+def test_fonts_record_actual_faces_and_preserve_cjk(tmp_path):
+    import json
+    source = samples(tmp_path)['fonts']
+    target = tmp_path / 'fonts.pdf'
+    result = render(source, target)
+    assert result.returncode == 0, result.stderr
+    reports = [json.loads(line.partition(':')[2]) for line in result.stderr.splitlines()
+               if line.startswith('FONT_REPORT:')]
+    assert len(reports) == 1
+    report = reports[0]
+    assert report['fonts'] and sum(font['glyphCount'] for font in report['fonts']) > 0
+    assert not report['missing'] and not report['lastResort']
+    assert 'FONT_END' in PdfReader(target).pages[0].extract_text()
+
+
+@pytest.mark.integration
+def test_missing_glyph_fails_without_output(tmp_path):
+    source = tmp_path / 'missing.md'
+    source.write_text('# Missing glyph\n\nUnavailable \U0010ffff end.')
+    target = tmp_path / 'missing.pdf'
+    assert render(source, target).returncode != 0
+    assert not target.exists()

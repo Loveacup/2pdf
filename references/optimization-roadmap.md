@@ -123,6 +123,18 @@ A4、vendor hashes、Playwright 1.58.2 与 Chromium revision 1208；
 
 完整套件 `pytest -c tests/pytest.ini tests -q`：167 passed。
 
+### P1 字体验收
+
+字体项已实施。`fonts-final/` 与 `baseline/` 保存前后页面，均 1 页；
+中日韩、全角标点、emoji、上下标目视无 tofu。CLI FONT_REPORT 记录实际
+SF NS、PingFang SC、Noto Sans SC、Apple Color Emoji 的 PostScript 名与 glyphCount；
+`fonts-system.json` 记录版本；Chromium 实测 145.0.7632.6，Playwright 1.58.2。
+检测 U+10FFFF 缺字真实 CLI 非零退出且不产出；普通兼容文档仍 1 页。
+macOS 已验收；Windows 没有实机证据，明确未验收。CDP/notdef 加 CoreText cmap
+不能证明字体没有自带 box 映射，因此始终要求最终页面视觉核对。
+
+完整套件 `pytest -c tests/pytest.ini tests -q`：169 passed。
+
 
 ### P0-A 验收记录
 

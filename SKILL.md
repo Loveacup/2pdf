@@ -127,6 +127,14 @@ python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin 
 
 **Cross-platform (mac + Windows)**: CJK font stacks include PingFang/YaHei (+ Consolas/Cascadia for code); system-Chrome discovery covers `/Applications`, `%ProgramFiles%`, Linux paths; Playwright cache detection covers `Library/Caches`, `.cache`, `%LOCALAPPDATA%`; no `/tmp` hardcoding (uses the platform temp dir); vendored assets live next to `scripts/`. Deploy/sync shell scripts remain mac-side; on Windows just `git pull` + `--setup`.
 
+**P1 font evidence:** all output formats await `document.fonts.ready`, query actual
+Chromium platform fonts and print a machine-readable `FONT_REPORT` (faces,
+PostScript names, glyph counts, missing-glyph diagnostics). LastResort/notdef
+failures stop atomic delivery; macOS also checks CoreText glyph IDs for each
+text node's actual fonts. No system font is bundled or downloaded. Inspect final
+pages as well: font-ready and cmap coverage alone do not prove visual correctness.
+macOS P1 corpus is verified; Windows is explicitly **not yet visually verified**.
+
 ### Claude Code Relay Workflow
 
 The script and Claude Code work as a team. The script handles rendering mechanics, Claude Code handles content intelligence.
