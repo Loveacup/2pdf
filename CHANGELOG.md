@@ -2,7 +2,16 @@
 
 格式：每次行为变更记录 improved / preserved / confirmed，并引用 `references/core-requirements.md` 的 CR ID。
 
-## Unreleased
+## 2.0.0 — 2026-10-20
+
+**Breaking**：四种输出默认离线、只授权源文件真实父目录；远程资源须 `--allow-origin`，根外资源须 `--resource-root`；文档脚本不执行；`--fallback pandoc` 拒绝。迁移说明见 `SKILL.md` Pitfalls 与 `references/optimization-roadmap.md`。
+
+### 真实文档回归修复
+
+- **Improved（CR09）**：`--verify` 的 Mermaid 源码泄漏与错误炸弹检查扣除源文正文（非 mermaid 围栏）中本就写到的同类文字，仅超出部分判错；讨论 Mermaid 报错的文档（如本技能自身 `SKILL.md`、`md2pdf-details.md`）不再被拒绝交付。
+- **Improved（CR06）**：分页仅对不超过可印高度 30% 的代码块、Callout、引用、列表项与表格保持整体（原为 80%），更长的块允许拆分，避免整块推页留下半页空白。
+- **Preserved（CR05, CR09）**：PDF 中多于源文正文的错误文字/图源码仍判错；标题与首内容相邻、多页块可拆分、widow/orphan 规则不变。
+- **Confirmed**：仓库 8 份真实文档在基线与新版的对比渲染中，`SKILL.md`、`md2pdf-details.md` 由质量门失败变为通过；`advanced.md` 从 15 页回到 12 页（基线 11 页）、`optimization-roadmap.md` 11→10 页，接触表目视无半页空白；新增回归测试在旧阈值下失败（8 页）、新阈值下通过（≤6 页）。18 个主题严格验收全部通过，png/html/wechat 与 430×932 公式文档均成功。
 
 ### P1 复核修复
 
