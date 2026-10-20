@@ -7,8 +7,11 @@
 - **Improved（CR06）**：所有排版格式及 Python 入口默认显示 frontmatter 笔记信息卡；新增显式关闭 `--no-properties`，保留 `--properties`，最后出现的开关生效。无需每次手动补参数。
 - **Preserved（CR08, CR13）**：`--no-metadata` 仅控制 PDF metadata；`--byline` 继续独立控制署名字段。源 Markdown 只读，空值不补造，显式关闭不影响正文。
 - **Confirmed（CR06, CR09）**：新增默认显示、显式关闭及开关顺序的正文行为回归；完整套件 **291 passed**。真实报告未传 `--properties` 即显示信息卡，21 页 A4，图表 3/3；`--verify-strict` 与显式属性文本哨兵检查通过。
+- **Improved（CR12）**：`--preflight` 与 `--setup` 不再检查 pandoc。2.0 已停用 pandoc 救生艇，缺 pandoc 不应让 preflight 报 DEGRADED。
 
 ## 2.0.0 — 2026-10-20
+
+**Breaking**：四种输出默认离线、只授权源文件真实父目录；远程资源须 `--allow-origin`，根外资源须 `--resource-root`；文档脚本不执行；`--fallback pandoc` 拒绝。迁移说明见 `SKILL.md` Pitfalls 与 `references/optimization-roadmap.md`。
 
 ### 终验修复
 
@@ -19,8 +22,7 @@
 - **Confirmed（CR04, CR06）**：Callout 继承错误、`gruvbox-dark` 黄色代码背景及非打印输出宽图溢出，在 `a75fd4c` 中已存在。字体误报与公式重复错误来自本版新增质量门。
 - **Confirmed（CR03, CR04, CR06, CR09, CR14）**：完整套件 **289 passed in 203.51s**。18 个主题的实际浏览器对比度测试通过，覆盖全部 Callout 类型与语法颜色。真实缺字仍拒绝交付，错误公式只报告 1 项结构化错误。
 - **Confirmed（CR03–CR09, CR14）**：14 份真实文档以默认参数加 `--verify` 全部成功，共 69 页。技术稿与报告的 14 项尺寸/格式复现全部成功；报告 PNG 从 1000 px 恢复为 A4 的 794 px、移动版的 430 px。已查看全部页的接触表，并逐页查看深色代码、Callout、宽图与 `·` 标题。
-
-**Breaking**：四种输出默认离线、只授权源文件真实父目录；远程资源须 `--allow-origin`，根外资源须 `--resource-root`；文档脚本不执行；`--fallback pandoc` 拒绝。迁移说明见 `SKILL.md` Pitfalls 与 `references/optimization-roadmap.md`。
+- **Note**：主题配色调整后，下方 P1 各块所写"与旧基线栅格像素一致"只对当时的提交成立。当前版本普通文档的内容与结构不变，但代码块与 Callout 的配色已改变。
 
 ### 真实文档回归修复
 

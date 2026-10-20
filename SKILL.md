@@ -96,7 +96,7 @@ python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin 
 | `--browser playwright\|chrome\|auto` | `playwright` (default, bundled Chromium); `chrome` (system Chrome via Playwright `executablePath`); `auto` tries bundled → system Chrome. All use the same resource policy and fresh context, never a personal profile. Prints actual `engine` + `executable` |
 | `--page-size A4\|WxH` | `A4` (default) or a custom mobile size like `430x932`. Validated up front |
 | `--setup` | One-time idempotent bootstrap: persistent venv + deps + Playwright Chromium + pinned vendor assets (Mermaid/hljs/KaTeX JS, CSS, WOFF2 and license; `vendor.lock.json`) + smoke render acceptance. Alias: `--preflight --fix` |
-| `--preflight [--json]` | Health-check current interpreter, deps, browsers, pandoc, vendored assets, persistent venv — no rendering. Exit 0 ok / 1 fatal / 2 missing doc |
+| `--preflight [--json]` | Health-check current interpreter, deps, browsers and the selected `--browser` engine, vendored assets, persistent venv — no rendering. Exit 0 ok / 1 fatal / 2 missing doc |
 | `--verify` | Verify staged PDF file/magic/pages, Mermaid-source/error text, diagram/formula counts and metadata. Formula counts compare source parser ↔ PDF total ↔ rendered. Any error fails; warnings/skips remain diagnostic |
 | `--verify-strict` | Implies `--verify`; also fails skipped required checks (e.g. pypdf or diagram/formula-count metadata for relevant source). Optional/not-applicable checks may skip. Image-only pages remain valid |
 | `--require-text TEXT` | Repeatable PDF body-text sentinel; implies `--verify`. Missing text fails delivery. Opt in to the expected source content; text is not inferred from image pixels |
