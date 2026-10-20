@@ -60,3 +60,25 @@ def test_find_system_chrome_windows_candidates():
          mock.patch("os.path.exists", return_value=False), \
          mock.patch("shutil.which", return_value=None):
         assert m._find_system_chrome() is None  # 不炸即分支覆盖
+
+
+def _fake_node(node_version, playwright_version):
+    def run(cmd, **_kw):
+        out = node_version if "--version" in cmd else playwright_version
+        return mock.Mock(returncode=0 if out else 1, stdout=out or "")
+    return run
+
+
+def test_playwright_install_blocker_version_boundary():
+    """Playwright <1.60 + Node ≥24.16 会在解压时挂死：setup 必须拒绝；边界外放行。"""
+    cases = [
+        (("v26.12.0", "1.58.2"), True),
+        (("v24.16.0", "1.59.9"), True),
+        (("v24.15.0", "1.58.2"), False),
+        (("v26.12.0", "1.60.0"), False),
+        (("v26.12.0", None), False),  # 本地无 playwright：npx 会取最新版
+    ]
+    for (node_v, pw_v), blocked in cases:
+        with mock.patch("shutil.which", return_value="/usr/bin/node"), \
+             mock.patch.object(m.subprocess, "run", side_effect=_fake_node(node_v, pw_v)):
+            assert (m._playwright_install_blocker() is not None) is blocked, (node_v, pw_v)

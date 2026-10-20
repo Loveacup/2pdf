@@ -1802,6 +1802,36 @@ def ok() -> str:
 """
 
 
+PLAYWRIGHT_INSTALL_TIMEOUT = 1800
+
+
+def _version_parts(text):
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    return tuple(int(g or 0) for g in m.groups()) if m else None
+
+
+def _playwright_install_blocker():
+    """Playwright <1.60 在 Node ≥24.16 解压浏览器 zip 时挂死（microsoft/playwright#40724、#41000）。
+    命中则返回说明，setup 拒绝安装而非无限等待；无法判定版本时返回 None。"""
+    node = shutil.which("node")
+    if not node:
+        return None
+    try:
+        node_v = _version_parts(subprocess.run([node, "--version"], capture_output=True,
+                                               text=True, timeout=15).stdout)
+        pw = subprocess.run([node, "-e", "process.stdout.write(require('playwright/package.json').version)"],
+                            capture_output=True, text=True, timeout=15, env=_node_env())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    pw_v = _version_parts(pw.stdout) if pw.returncode == 0 else None
+    if not node_v or not pw_v:
+        return None
+    if pw_v < (1, 60, 0) and node_v >= (24, 16, 0):
+        return (f"Playwright {pw.stdout.strip()} 在 Node {'.'.join(map(str, node_v))} 上解压浏览器会挂死；"
+                "先运行 npm install --prefix ~ playwright@^1.60（或改用 Node ≤24.15），再重跑初始化")
+    return None
+
+
 def run_setup():
     """--setup 一键引导（幂等）：venv+依赖 → 浏览器 → vendor pin → smoke 渲染验收。
 
@@ -1822,13 +1852,21 @@ def run_setup():
         print(f"  ❌ node 缺失：{hint}")
         failures.append("node")
     elif not _bundled_launchable():
-        print("  📥 安装 playwright chromium（首次较慢，数百 MB）...")
-        r = subprocess.run([shutil.which("npx"), "-y", "playwright", "install", "chromium"],
-                           env=_node_env(), text=True, shell=(sys.platform == "win32"))
+        blocker = _playwright_install_blocker()
+        if blocker:
+            print(f"  ❌ {blocker}")
+        else:
+            print("  📥 安装 playwright chromium（首次较慢，数百 MB）...")
+            try:
+                subprocess.run([shutil.which("npx"), "-y", "playwright", "install", "chromium"],
+                               env=_node_env(), text=True, shell=(sys.platform == "win32"),
+                               timeout=PLAYWRIGHT_INSTALL_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                print(f"  ❌ playwright install 超过 {PLAYWRIGHT_INSTALL_TIMEOUT}s 未结束，已中止")
         if _bundled_launchable():
             print("  ✅ playwright chromium 就绪")
         elif _find_system_chrome():
-            print("  ⚠️  bundled chromium 未装成，系统 Chrome 可作降级引擎")
+            print("  ⚠️  bundled chromium 未装成，系统 Chrome 可作降级引擎（--browser chrome/auto）")
         else:
             print("  ❌ 无可用浏览器引擎")
             failures.append("browser")

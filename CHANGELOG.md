@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### setup 浏览器安装防挂死
+
+- **Improved（CR10）**：`--setup`（`maintenance.py init` 调用）在 Playwright <1.60 且 Node ≥24.16 时拒绝运行 `playwright install` 并给出升级 Playwright 或换 Node 的指引，不再在解压阶段无限等待（microsoft/playwright#40724、#41000）；其余情况安装最多等待 1800s 后中止。
+- **Preserved（CR07, CR10）**：有系统 Chrome 时 bundled 安装失败仍只警告并以 `--browser auto` 跑 smoke；初始化不升级依赖。
+- **Confirmed**：本机 Node 26.12.0 + Playwright 1.58.2 实测下载完成后解压挂死 20 分钟；新检测在本机命中，版本边界单测覆盖 1.59.9/1.60.0、24.15/24.16 与未安装 Playwright。
+
 ### P0-B — 隔离、资源访问与可重复运行
 
 - **Improved（CR04–CR07, CR09, CR11, CR13）**：PDF/PNG/HTML/公众号共用同文件系统私有暂存与按规范化目标的非阻塞内核所有权；HTML、Node、后处理文件均随调用隔离，成功验收才原子交付。异常与可处理取消清理自己的暂存/子进程，退出释放所有权；硬杀遗留不复用。Python 递归冻结资源，Chromium 独立 context、CSP 与请求拦截共同执行边界。
