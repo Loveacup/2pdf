@@ -40,6 +40,23 @@ def test_semantic_pagination_preserves_long_blocks_and_heading_pair(tmp_path):
 
 
 @pytest.mark.integration
+def test_mid_length_code_blocks_split_instead_of_leaving_half_empty_pages(tmp_path):
+    """Blocks a bit over half a page must not each be pushed to a fresh page."""
+    block = '\n'.join(f'line_{i:02d} = {i}' for i in range(34))  # ≈ 60% of an A4 page
+    parts = [f'## Section {n}\n\nSECTION_{n}_START\n\n```python\n{block}\n```\n' for n in range(8)]
+    source = tmp_path / 'mid-blocks.md'
+    source.write_text('# Density\n\n' + '\n'.join(parts), encoding='utf-8')
+    pdf = tmp_path / 'mid-blocks.pdf'
+    result = render(source, pdf)
+    assert result.returncode == 0, result.stderr
+    texts = [p.extract_text() for p in PdfReader(pdf).pages]
+    body = '\n'.join(texts)
+    assert all(body.count(f'SECTION_{n}_START') == 1 for n in range(8))
+    # Eight ~60% blocks fit in about six pages; keeping each whole needs eight.
+    assert len(texts) <= 6, len(texts)
+
+
+@pytest.mark.integration
 def test_tables_repeat_headers_and_reconcile_data(tmp_path):
     source = samples(tmp_path)['tables']
     target = tmp_path / 'tables.pdf'

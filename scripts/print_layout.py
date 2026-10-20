@@ -10,17 +10,24 @@ def page_geometry(page_size):
     return width - 20 * 96 / 25.4, height - 24 * 96 / 25.4
 
 
+# Fraction of the printable page height up to which a block is kept unsplit.
+KEEP_RATIO = 0.3
+
+
 def prepare_print_js(page_size):
     width, height = page_geometry(page_size)
     return """
   const layoutErrors = await page.evaluate(({width, height}) => {
-    document.querySelectorAll('pre, .callout, blockquote, table, ul, ol').forEach(el => {
+    // Keep only short blocks whole. Holding blocks up to most of a page together pushes them to the
+    // next page and leaves half-empty pages; longer blocks split, with widows/orphans guarding lines.
+    const keepLimit = height * __KEEP_RATIO__;
+    const keepIfShort = el => {
       const rect = el.getBoundingClientRect();
       const style = getComputedStyle(el);
       const outerHeight = rect.height + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
-      // A keep is only advisory for a block that fits. Never lock a multi-page block.
-      el.style.breakInside = outerHeight <= height * 0.8 ? 'avoid' : 'auto';
-    });
+      el.style.breakInside = outerHeight <= keepLimit ? 'avoid' : 'auto';
+    };
+    document.querySelectorAll('pre, .callout, blockquote, table, li').forEach(keepIfShort);
     document.querySelectorAll('img').forEach(el => {
       el.style.maxWidth = '100%';
       el.style.maxHeight = Math.floor(height - 32) + 'px';
@@ -51,7 +58,7 @@ def prepare_print_js(page_size):
     await browser.close();
     process.exit(6);
   }
-""".replace('__GEOMETRY__', json.dumps({'width': width, 'height': height}))
+""".replace('__GEOMETRY__', json.dumps({'width': width, 'height': height})).replace('__KEEP_RATIO__', str(KEEP_RATIO))
 
 
 def print_viewport_js(page_size):
