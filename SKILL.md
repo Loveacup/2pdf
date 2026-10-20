@@ -158,6 +158,11 @@ Step 3 (if needed): Claude Code re-runs with flags → script wraps matching con
 | `<div class="text-sm" markdown="1">...</div>` | Shrink to 12px |
 | `<div class="text-xs" markdown="1">...</div>` | Shrink to 11px |
 
+**P1 pagination:** Chromium fragments the final print flow. Headings stay with the
+first content fragment; short code/Callout/list/table blocks request keep-together,
+while multi-page blocks may split. Images fit the printable area. Explicit page
+break markers are preserved; no fixed-height page-position simulation is used.
+
 **Decision heuristics** for Claude Code (not hardcoded in script):
 - **Outline**: 5+ child headings with avg <500c → `--sm` to shrink the section
 - **Head/Tail**: metadata (版本/日期/作者) or changelog (变更历史) → `--xs-after`

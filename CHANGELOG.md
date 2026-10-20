@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### P1 — 分页语义
+
+- **Improved（CR04, CR06, CR08）**：最终打印流使用全级标题/首内容相邻规则；按实际可打印高度仅保留短块，长代码、Callout、列表和表格允许跨页；图片等比适配页面。固定共享合成样本与 Playwright 1.58.2 基线。
+- **Preserved（CR01–CR13）**：既有分页标记、parser、主题、字体栈、Mermaid 版本、P0 资源与原子交付边界不变；不删除任何页。
+- **Confirmed（CR04, CR08, CR13）**：默认 bundled Chromium 真实 CLI 前后分页样本均 10 页，普通兼容样本均 1 页；页面证据与命令保存在路线图证据目录。行为测试核对标题配对、长块全部哨兵、脚注及重复结构。
+- **Confirmed（CR03–CR12）**：完整套件 165 passed；分页样本重复两次页数与逐页文本结构一致。
+
 ### setup 浏览器安装防挂死
 
 - **Improved（CR10）**：`--setup`（`maintenance.py init` 调用）在 Playwright <1.60 且 Node ≥24.16 时拒绝运行 `playwright install` 并给出升级 Playwright 或换 Node 的指引，不再在解压阶段无限等待（microsoft/playwright#40724、#41000）；其余情况安装最多等待 1800s 后中止。

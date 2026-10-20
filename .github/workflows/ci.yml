@@ -19,7 +19,7 @@ jobs:
           node-version: '22'
       - name: Prepare browser and CJK fonts
         run: |
-          npm install --prefix "$HOME" playwright
+          npm install --prefix "$HOME" playwright@1.58.2
           echo "NODE_PATH=$HOME/node_modules" >> "$GITHUB_ENV"
           "$HOME/node_modules/.bin/playwright" install --with-deps chromium
           sudo apt-get update

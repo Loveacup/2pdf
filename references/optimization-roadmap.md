@@ -98,6 +98,21 @@
 - 上游源码与许可证链接保留固定 SHA；本方案不引用未经测量的性能结论。
 - 本地源码引用行号仅用于导航，以函数实际行为为准。
 - **P0-A/P0-B（2026-10-20）已交付，P1/P2 未开始**。PDF 编辑、表单链及分页策略未改；未升级依赖或替换解析器。P0-A 保留全部生成页并增加 `--verify-strict`、`--require-text`；P0-B 增加全格式私有暂存、非阻塞输出所有权、`--resource-root`、默认离线及 `--allow-origin`，主/legacy 共享同等资源与交付边界。旧 pandoc 救生艇明确拒绝，迁移指导见下。
+- **P1 分页语义（2026-10-20）已实施**：全级标题与首内容相邻、短块按实际可打印高度 keep、长块允许拆分；图片适配页宽/页高，保留显式分页。其余 P1 项继续按顺序实施；P2 不在范围。
+
+### P1 环境与分页验收
+
+证据目录：`/var/folders/47/8_kft2fx0w3bqlcxcppz_3pm0000gn/T/2pdf-p1-evidence.1ieos4j4`。
+`samples/` 为冻结合成输入；`environment.json` 记录 OS、Python 依赖、主题 blue、
+A4、vendor hashes、Playwright 1.58.2 与 Chromium revision 1208；
+`fonts-system.json` 记录系统字体名称/版本。CI 同步固定 Playwright 1.58.2。
+原路径为只读 `a75fd4c` worktree，新路径为当前实现，均使用默认 bundled Chromium。
+`commands.json` 保存真实 CLI 参数、退出码和输出，分页样本前后均为 10 页；
+标题 HEADING_PAIR 与 FIRST_CONTENT 同页，长段/90 行代码/80 段 Callout、
+图片、短表、脚注及显式分页尾哨兵完整，关键页面已转图查看。
+普通无公式兼容样本前后均 1 页。`pytest -c tests/pytest.ini tests -q`：165 passed；
+分页集成测试连续两次真实渲染的页数与逐页文本结构完全一致。
+
 
 ### P0-A 验收记录
 

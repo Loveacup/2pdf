@@ -26,6 +26,7 @@ from image_assets import embed_local_images, local_image_check_js, LocalImageErr
 from pdf_delivery import staged_pdf, staged_output, run_render_process, DeliveryError
 from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_html,
                              browser_policy_js, browser_resource_check_js)
+from print_layout import prepare_print_js, print_viewport_js
 
 # 支持的输出格式
 VALID_FORMATS = ("pdf", "png", "html", "wechat")
@@ -785,10 +786,10 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
     margin: 12px 0 6px 0;
     font-weight: 600;
   }}
-  /* Heading pagination hints: suggest keeping headings with following content.
-     Unlike page-break-before:always, break-after:avoid is advisory —
-     Chrome will try to honor it but can ignore when space is tight. */
-  h2, h3, h4 {{ break-after: avoid; }}
+  /* Let Chromium fragment the flow; keep headings with the first content fragment. */
+  h1, h2, h3, h4, h5, h6 {{ break-after: avoid; page-break-after: avoid; }}
+  h1 + *, h2 + *, h3 + *, h4 + *, h5 + *, h6 + * {{ break-before: avoid; }}
+  .callout-title, summary, hr {{ break-after: avoid; }}
 
   /* ===== Text ===== */
   p {{
@@ -1017,6 +1018,12 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
 
   /* ===== Mobile font-size adjustment (430×932) ===== */
   {mobile_adjust_css}
+  /* Semantic print rules apply after themes; no position-based page simulation. */
+  @media print {{
+    pre {{ overflow-wrap: anywhere; white-space: pre-wrap; }}
+    img {{ max-width: 100%; object-fit: contain; break-inside: avoid; }}
+    .doc-section, .doc-subsection {{ break-inside: auto; }}
+  }}
 </style>
 <link rel="stylesheet" href="{_hljs_css_src(effective_theme)}">
 <script src="{_hljs_js_src()}"></script>
@@ -1305,9 +1312,11 @@ const {{ chromium }} = require('playwright');
 (async () => {{
   const browser = await {launch_expr};
 {browser_policy_js(html_path)}
+{print_viewport_js(page_size)}
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {local_image_check_js()}
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
+{prepare_print_js(page_size)}
 {browser_resource_check_js()}
   await page.pdf({{
     path: {json.dumps(str(pdf_path.resolve()))},
