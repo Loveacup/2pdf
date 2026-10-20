@@ -100,7 +100,7 @@ python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin 
 | `--verify` | Verify the staged PDF in a separate process before delivery: file size/magic, page count, Mermaid-source leak/error text, diagram counts, metadata. Any error exits nonzero; warnings and skipped checks remain diagnostic |
 | `--verify-strict` | Implies `--verify`; also fails when a **required** check is skipped (e.g. missing `pypdf`, or missing diagram-count metadata for a Mermaid source). Optional/not-applicable checks may skip. A legitimate image-only page does not fail |
 | `--require-text TEXT` | Repeatable PDF body-text sentinel; implies `--verify`. Missing text fails delivery. Opt in to the expected source content; text is not inferred from image pixels |
-| `--allow-diagram-errors` | Explicitly allow a PDF to be produced even when some Mermaid diagrams failed (default: **fail-fast, exit 3, no output file**) |
+| `--allow-diagram-errors` | Explicit waiver for completed Mermaid runs with failed blocks (default: **exit 3, no output**). Prints `MERMAID_WAIVER` with honest total/rendered/errors and visible failure placeholders. Timeouts never proceed; `--verify` still rejects count mismatches |
 | `--no-bootstrap` | Disable the automatic venv self-healing re-exec |
 | `--fallback pandoc` | **Breaking change (P0-B): refuses conversion.** The old pandoc/Chrome CLI path cannot enforce the same request policy. Migrate to `--browser chrome` / `auto`, or initialize bundled Chromium |
 | `--no-metadata` | Skip writing source frontmatter into PDF metadata (including diagram-count keys) |
@@ -192,7 +192,7 @@ Obsidian MD → preprocess → Python markdown (md_in_html) → section wrap →
 4. **Mermaid**: Convert mermaid code blocks → `<div class="mermaid">`, load pinned Mermaid JS vendored next to the script (`scripts/mermaid.min.js` + `vendor.lock.json`, downloaded by `--setup`), auto-scale SVG
 5. **Syntax Highlighting**: pinned local highlight.js and theme-aware CSS (atom-one-dark / atom-one-light), embedded into the invocation HTML; no CDN fallback
 6. **Content Adaptation JS**: A4 tables keep readable font sizes, wrap cells/code and repeat headers; oversized rows may split. Unreadable/overflowing PDF tables fail with table/cell diagnostics instead of column-count shrinking. Section density classes and mobile-only cards remain.
-7. **Render**: Playwright Chromium headless — `waitForFunction` waits for Mermaid SVG rendering, `networkidle` ensures all resources loaded, then `page.pdf()` with A4 format + page numbers + native bookmarks & accessibility tags (`outline: true, tagged: true`)
+7. **Render**: await fonts, completed Mermaid status and decoded images (including images created by rendering); invisible/overflowing diagrams fail. No fixed sleeps or timeout-and-proceed. Then `page.pdf()` with A4 format + page numbers + native bookmarks & accessibility tags (`outline: true, tagged: true`). `IMAGE_STAT` records decoded dimensions; offline vendors need no CDN.
 8. **Post-process and deliver**: Keep **all** generated pages, including bitmap/vector-only pages, short endings and intentional blanks. Write metadata via pypdf `clone_from` (preserves native outline/tags); use pypdf bookmarks only when no native outline exists. Verify the staged PDF when requested, then atomically publish it.
 
 For pagination rules, font sizing tables, Mermaid details, callout types, and CSS customization, see `references/md2pdf-details.md`.

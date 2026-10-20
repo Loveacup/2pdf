@@ -28,20 +28,23 @@ def embed_local_images(md_text, md_dir, policy=None):
 def local_image_check_js():
     """Require every embedded document image to decode before delivery."""
     return """
-  const imageErrors = await page.evaluate(async () => {
-    const errors = [];
-    await Promise.all(Array.from(document.querySelectorAll('img[data-jz-local-source]')).map(async img => {
+  const imageStatus = await page.evaluate(async () => {
+    const errors = [], decoded = [];
+    const images = Array.from(document.querySelectorAll('img'));
+    await Promise.all(images.map(async img => {
       try {
         await img.decode();
         if (!img.naturalWidth || !img.naturalHeight) throw new Error('empty image');
+        decoded.push({width: img.naturalWidth, height: img.naturalHeight});
       } catch (error) {
-        errors.push({ source: img.getAttribute('data-jz-local-source'), reason: String(error) });
+        errors.push({ source: img.getAttribute('data-jz-local-source') || img.currentSrc.slice(0, 160), reason: String(error) });
       }
     }));
-    return errors;
+    return {errors, total: images.length, decoded};
   });
-  if (imageErrors.length) {
-    console.error('LOCAL_IMAGE_ERRORS:' + JSON.stringify(imageErrors));
+  console.log('IMAGE_STAT:' + JSON.stringify(imageStatus));
+  if (imageStatus.errors.length) {
+    console.error('LOCAL_IMAGE_ERRORS:' + JSON.stringify(imageStatus.errors));
     await browser.close();
     process.exit(4);
   }

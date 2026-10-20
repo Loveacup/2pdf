@@ -595,6 +595,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
   // Python 侧据此 fail-fast（有错默认不产出 PDF），而非把错误炸弹印进成品。
   window.__mermaidStatus = { total: 0, rendered: 0, errors: [], finished: false };
   window.addEventListener('load', async function() {
+    await document.fonts.ready;
     var st = window.__mermaidStatus;
     var blocks = Array.from(document.querySelectorAll('.mermaid'));
     st.total = blocks.length;
@@ -613,12 +614,15 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
           head: src.trim().split('\\n').slice(0, 2).join(' | ').slice(0, 120)
         });
         el.setAttribute('data-mermaid-failed', '1');
+        el.textContent = 'Diagram ' + (i + 1) + ' unavailable (explicit error waiver required)';
+        var errorSvg = document.getElementById('djzmm' + i);
+        if (errorSvg) errorSvg.remove();
       }
     }
 
     // Auto-scale: measure each SVG and proportionally fit to page
-    var maxW = 580;  // ~A4 content width at 96dpi minus margins
-    var maxH = 650;  // ~65% of A4 page height, leave room for text
+    var maxW = Math.min(580, document.documentElement.clientWidth - 26);
+    var maxH = 650;
     var pageBreakH = 750;
 
     var scaleWarnings = [];
@@ -1237,14 +1241,30 @@ def _mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors):
   await page.waitForFunction(() => {{
     const st = window.__mermaidStatus;
     return document.querySelectorAll('.mermaid').length === 0 || (st && st.finished);
-  }}, {{ timeout: {wait_timeout} }}).catch(() => console.error('Mermaid wait timeout, proceeding'));
-  const mmSt = await page.evaluate(() => window.__mermaidStatus || null);
+  }}, null, {{ timeout: {wait_timeout} }}).catch(async () => {{
+    console.error('MERMAID_ERRORS:' + JSON.stringify([{{index: 0, message: 'Rendering did not finish before deadline'}}]));
+    await browser.close(); process.exit(3);
+  }});
+  const mmSt = await page.evaluate(() => {{
+    const st = window.__mermaidStatus;
+    if (!st) return null;
+    document.querySelectorAll('.mermaid').forEach((el, i) => {{
+      if (el.hasAttribute('data-mermaid-failed')) return;
+      const svg = el.querySelector('svg');
+      const rect = svg && svg.getBoundingClientRect(), box = el.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0 || rect.left < box.left - 1 ||
+          rect.right > box.right + 1 || rect.top < box.top - 1 || rect.bottom > box.bottom + 1) {{
+        st.errors.push({{index: i + 1, message: 'Diagram is invisible or overflows its container'}});
+      }}
+    }});
+    return st;
+  }});
   if (mmSt) console.log('MERMAID_STAT:' + JSON.stringify({{ total: mmSt.total, rendered: mmSt.rendered }}));
   if (mmSt && mmSt.errors.length > 0) {{
     console.error('MERMAID_ERRORS:' + JSON.stringify(mmSt.errors));
     if (!{allow}) {{ await browser.close(); process.exit(3); }}
-  }}
-  await page.waitForTimeout(2000);"""
+    console.log('MERMAID_WAIVER:' + JSON.stringify({{total: mmSt.total, rendered: mmSt.rendered, errors: mmSt.errors}}));
+  }}"""
 
 
 def _parse_mermaid_stat(stdout):
@@ -1308,8 +1328,9 @@ const {{ chromium }} = require('playwright');
 {browser_policy_js(html_path)}
 {print_viewport_js(page_size)}
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
-{local_image_check_js()}
+  await page.evaluate(async () => {{ await document.fonts.ready; }});
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
+{local_image_check_js()}
 {font_check_js()}
 {prepare_print_js(page_size)}
 {browser_resource_check_js()}
@@ -1346,6 +1367,10 @@ const {{ chromium }} = require('playwright');
             raise RuntimeError(result.stderr.strip())
         if result.returncode == 0 and pdf_path.exists() and pdf_path.stat().st_size >= 1024:
             check_font_report(result.stdout)
+            for label in ('IMAGE_STAT', 'MERMAID_WAIVER'):
+                record = re.search(label + r":(.*)", result.stdout)
+                if record:
+                    print(label + ":" + record.group(1), file=sys.stderr)
             scale_match = re.search(r"MERMAID_SCALE_WARNINGS:(\[[^\n]*\])", result.stdout)
             if scale_match:
                 for item in json.loads(scale_match.group(1)):
@@ -2229,9 +2254,11 @@ const {{ chromium }} = require('playwright');
 (async () => {{
   const browser = await {launch_expr};
 {browser_policy_js(html_path)}
+  await page.setViewportSize({{width: {view_w}, height: 1000}});
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
-{local_image_check_js()}
+  await page.evaluate(async () => {{ await document.fonts.ready; }});
 {common_wait}
+{local_image_check_js()}
 {font_check_js()}
 {browser_resource_check_js()}
 {action}
@@ -2267,6 +2294,10 @@ const {{ chromium }} = require('playwright');
 
         if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
             check_font_report(result.stdout)
+            for label in ('IMAGE_STAT', 'MERMAID_WAIVER'):
+                record = re.search(label + r":(.*)", result.stdout)
+                if record:
+                    print(label + ":" + record.group(1), file=sys.stderr)
             return
         last_err = result.stderr
         if idx < len(plan) - 1:

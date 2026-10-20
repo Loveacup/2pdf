@@ -95,3 +95,38 @@ def test_missing_glyph_fails_without_output(tmp_path):
     target = tmp_path / 'missing.pdf'
     assert render(source, target).returncode != 0
     assert not target.exists()
+
+
+@pytest.mark.integration
+def test_mermaid_and_images_ready_before_pdf(tmp_path):
+    import json
+    source = samples(tmp_path)['readiness']
+    target = tmp_path / 'ready.pdf'
+    result = render(source, target, '--verify-strict')
+    assert result.returncode == 0, result.stderr
+    reader = PdfReader(target)
+    assert reader.metadata['/JZDiagramTotal'] == reader.metadata['/JZDiagramRendered'] == '2'
+    body = ''.join(''.join(p.extract_text() for p in reader.pages).split())
+    assert 'DIAGRAM_ONE' in body and 'DIAGRAM_TWO' in body and 'READY_END' in body
+    image = next(json.loads(line.partition(':')[2]) for line in result.stderr.splitlines()
+                 if line.startswith('IMAGE_STAT:'))
+    assert image['total'] == len(image['decoded']) == 1
+    assert not image['errors']
+    assert all(item['width'] > 0 and item['height'] > 0 for item in image['decoded'])
+
+
+@pytest.mark.integration
+def test_diagram_waiver_reports_incomplete_count(tmp_path):
+    import json
+    source = samples(tmp_path)['bad-diagram']
+    target = tmp_path / 'waiver.pdf'
+    assert render(source, target).returncode == 3
+    assert not target.exists()
+    result = render(source, target, '--allow-diagram-errors')
+    assert result.returncode == 0, result.stderr
+    report = next(json.loads(line.partition(':')[2]) for line in result.stderr.splitlines()
+                  if line.startswith('MERMAID_WAIVER:'))
+    assert report['total'] == 1 and report['rendered'] == 0 and len(report['errors']) == 1
+    reader = PdfReader(target)
+    assert reader.metadata['/JZDiagramTotal'] == '1'
+    assert reader.metadata['/JZDiagramRendered'] == '0'

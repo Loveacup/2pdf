@@ -135,6 +135,17 @@ macOS 已验收；Windows 没有实机证据，明确未验收。CDP/notdef 加 
 
 完整套件 `pytest -c tests/pytest.ini tests -q`：169 passed。
 
+### P1 Mermaid 与图片就绪验收
+
+本项已实施。`readiness/` 对照 `baseline/`：基线 1 页、当前 2 页（基线少字尾页
+被旧删页策略移除，P0-A 后已保护）；两图实际可见、不裁断。IMAGE_STAT 为 total=1/decoded=1、500×180；
+PDF 图数 2/2，严格验收通过。字体先就绪、图完成后再 decode 全部图片。
+错误样本默认 exit 3；`readiness-waiver/` 显式放行时报告 total=1/rendered=0、
+errors=1，并显示失败占位，不宣称成功。超时不再继续打印；离线依赖全来自
+已 pinned 本地 vendor，P0-B 离线零请求完整回归保持。普通兼容文档仍 1 页。
+
+完整套件 `pytest -c tests/pytest.ini tests -q`：171 passed。
+
 
 ### P0-A 验收记录
 

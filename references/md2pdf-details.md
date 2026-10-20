@@ -146,7 +146,8 @@ Mermaid diagrams in fenced code blocks are automatically rendered:
 - **Auto-scaling**: After rendering, JS measures each SVG and proportionally scales to fit page (max 580px wide, 650px tall)
 - **Natural sizing**: `useMaxWidth: false` — diagrams render at natural size, then scale down (not stretch up)
 - **ViewBox preservation**: Ensures crisp rendering at any scale via SVG viewBox
-- **Chrome timing**: Playwright waits for controlled Mermaid completion before printing; vendor loading is offline.
+- **P1 readiness**: fonts are ready before diagram layout; completed Mermaid status is mandatory and timeout fails closed. Every successful SVG has nonzero bounds within its container. All images (including renderer-created images) decode after diagrams finish and before print/export; `IMAGE_STAT` records dimensions. No fixed two-second delay remains.
+- **Explicit waiver**: `--allow-diagram-errors` shows failure placeholders and emits `MERMAID_WAIVER` with total/rendered/errors; it never claims all diagrams succeeded. Count metadata remains truthful, so `--verify` still rejects mismatches. Incomplete/time-out runs are not waived.
 
 
 ## Frontmatter display and preview

@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### P1 — Mermaid 与图片就绪
+
+- **Improved（CR03–CR05, CR09）**：字体就绪后布局 Mermaid，打印前强制完成状态、SVG 可见/容器边界及全部图片 decode；移除固定等待与超时继续。PNG/HTML 在初始布局前固定输出视口。IMAGE_STAT 记录解码数量/尺寸。
+- **Preserved（CR01–CR13）**：Mermaid 版本/pinned 离线 vendor、逐块报错、图数 metadata 对账、P0 资源/原子交付不变；无 CDN 和任意文档脚本执行。
+- **Confirmed（CR03–CR05, CR09）**：离线真实样本基线 1 页→当前 2 页（旧少字尾页删除由 P0-A 停止）；两图均可见且不裁断、图片解码 1/1；错误默认 exit 3 无产物；显式豁免真实报告 1/0/errors=1，metadata 同步，普通兼容文档仍 1 页。
+- **Confirmed（CR03–CR12）**：完整套件 171 passed，含默认 bundled Chromium、全格式资源零请求/并发回归及 readiness/显式豁免集成用例。
+
 ### P1 — 字体
 
 - **Improved（CR03, CR09）**：全格式等待 fonts.ready，按文本节点采集 CDP 实际字体、PostScript 名、glyphCount/fallback；LastResort/notdef 缺字终止，macOS 另查实际字体 CoreText glyph IDs；FONT_REPORT 记录检查范围及限制，不把 CSS 栈/ready 当命中证明。
