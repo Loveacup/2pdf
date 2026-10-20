@@ -29,7 +29,7 @@ from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_htm
                              browser_policy_js, browser_resource_check_js)
 from print_layout import prepare_print_js, print_viewport_js
 from font_readiness import font_check_js, check_font_report
-from math_rendering import (extract_math, restore_math_html, math_assets, math_check_js,
+from math_rendering import (extract_math, restore_math_html, math_assets, math_check_js, math_slugify,
                             MathRenderError, format_math_errors, katex_manifest,
                             vendor_bytes as math_vendor_bytes, ensure_katex_vendor)
 
@@ -507,6 +507,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
             "tables", "fenced_code", "toc", "sane_lists", "md_in_html",
             "footnotes",
         ],
+        extension_configs={"toc": {"slugify": math_slugify(formulas)}},
     )
     body = restore_math_html(body, formulas)
 
@@ -1035,7 +1036,17 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
         if (!firstRow) return;
         var cellsInFirst = firstRow.querySelectorAll('th, td');
         if (cellsInFirst.length <= 5) return;
-        var headers = Array.from(cellsInFirst).map(function(th) {{ return th.textContent.trim(); }});
+        var headers = Array.from(cellsInFirst);
+        function appendCellContent(target, cell) {{
+          if (!cell) return;
+          if (cell.querySelector('.jz-math')) {{
+            Array.from(cell.childNodes).forEach(function(child) {{
+              target.appendChild(child.cloneNode(true));
+            }});
+          }} else {{
+            target.appendChild(document.createTextNode(cell.textContent.trim()));
+          }}
+        }}
         var rows = table.querySelectorAll('tr');
         var wrapper = document.createElement('div');
         wrapper.className = 'wide-table-mobile';
@@ -1043,10 +1054,11 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
           var cells = rows[i].children;
           var card = document.createElement('div');
           card.className = 'wide-table-card';
-          var title = headers[0] + ': ' + (cells[0] ? cells[0].textContent.trim() : '');
           var titleEl = document.createElement('div');
           titleEl.className = 'wide-table-card-title';
-          titleEl.textContent = title;
+          appendCellContent(titleEl, headers[0]);
+          titleEl.appendChild(document.createTextNode(': '));
+          appendCellContent(titleEl, cells[0]);
           card.appendChild(titleEl);
           var bodyEl = document.createElement('div');
           bodyEl.className = 'wide-table-card-body';
@@ -1055,7 +1067,8 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
             kv.className = 'wide-table-kv';
             var key = document.createElement('span');
             key.className = 'wide-table-kv-key';
-            key.textContent = headers[j] + ':';
+            appendCellContent(key, headers[j]);
+            key.appendChild(document.createTextNode(':'));
             var val = document.createElement('span');
             val.className = 'wide-table-kv-val';
             if (cells[j]) val.innerHTML = cells[j].innerHTML;
@@ -2210,7 +2223,12 @@ def inline_css(html):
 
     html = re.sub(r'''<link\b(?=[^>]*\brel=["']stylesheet["'])[^>]*\bhref=["']([^"']*)["'][^>]*>''',
                   embed_style, html, flags=re.IGNORECASE)
-    return css_inline.CSSInliner(load_remote_stylesheets=False).inline(html)
+    # At-rules cannot be inlined: math webfonts must remain in a style tag.
+    # Keep the existing non-math export structure (including removal of at-rules).
+    has_math_fonts = bool(re.search(r'''\bclass=["'][^"']*\bjz-math\b''', html))
+    return css_inline.CSSInliner(
+        load_remote_stylesheets=False, keep_at_rules=has_math_fonts,
+    ).inline(html)
 
 
 def _render_playwright_output(html_path, out_path, fmt, page_size="A4", browser="playwright",
@@ -2246,6 +2264,19 @@ def _render_playwright_output(html_path, out_path, fmt, page_size="A4", browser=
     except _NeedPandoc:
         raise RuntimeError(f"{fmt} 渲染需 playwright 或系统 chrome，均不可用；先跑 --preflight")
 
+    def check_render_error(result):
+        # Content/security failures must not fall back to another engine.
+        if result.returncode == 3:
+            raise MermaidRenderError(_format_mermaid_errors(result.stderr))
+        if result.returncode == 4:
+            raise LocalImageError(result.stderr.strip())
+        if result.returncode == 5:
+            raise ResourceError(result.stderr.strip())
+        if result.returncode in (6, 7):
+            raise RuntimeError(result.stderr.strip())
+        if result.returncode == 8:
+            raise MathRenderError(format_math_errors(result.stderr))
+
     last_err = ""
     for idx, (launch_expr, engine, exe) in enumerate(plan):
         print(f"  \U0001F5A5  engine={engine} executable={exe}", file=sys.stderr)
@@ -2272,27 +2303,55 @@ const {{ chromium }} = require('playwright');
             ["node", str(script_path)], text=True, env=_node_env(),
         )
 
-        # M1.2 exit 3 = Mermaid 内容错误：立即终止，不降级引擎
-        if result.returncode == 3:
-            raise MermaidRenderError(_format_mermaid_errors(result.stderr))
-        if result.returncode == 4:
-            raise LocalImageError(result.stderr.strip())
-        if result.returncode == 5:
-            raise ResourceError(result.stderr.strip())
-        if result.returncode == 6:
-            raise RuntimeError(result.stderr.strip())
-        if result.returncode == 7:
-            raise RuntimeError(result.stderr.strip())
-        if result.returncode == 8:
-            raise MathRenderError(format_math_errors(result.stderr))
+        check_render_error(result)
 
-        if fmt in ("html", "wechat"):
+        if result.returncode == 0 and fmt in ("html", "wechat"):
             out = result.stdout
             if "__HTML_START__" in out and "__HTML_END__" in out:
                 b64 = out.split("__HTML_START__", 1)[1].split("__HTML_END__", 1)[0]
                 content = base64.b64decode(b64).decode("utf-8")
                 if fmt == "wechat":
                     content = inline_css(content)
+                    # Reload the exact transformed bytes under the same policy,
+                    # before publishing anything to the staged delivery target.
+                    check_font_report(result.stdout)
+                    diagram_reports = [
+                        line for line in result.stdout.splitlines()
+                        if line.startswith('MERMAID_WAIVER:')
+                    ]
+                    math_record = re.search(r"MATH_STAT:(.*)", result.stdout)
+                    math_status = json.loads(math_record.group(1)) if math_record else None
+                    if math_status is not None:
+                        math_status.update(finished=True, errors=[])
+                    with tempfile.TemporaryDirectory(prefix="wechat-", dir=html_path.parent) as tmp:
+                        final_path = Path(tmp) / "final.html"
+                        final_path.write_text(content, encoding="utf-8")
+                        validation_script = f"""
+const {{ chromium }} = require('playwright');
+(async () => {{
+  const browser = await {launch_expr};
+{browser_policy_js(final_path)}
+  await page.setViewportSize({{width: {view_w}, height: 1000}});
+  await page.goto({json.dumps(final_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
+  await page.evaluate(status => {{ window.__mathStatus = status; }}, {json.dumps(math_status)});
+{math_check_js()}
+{local_image_check_js()}
+{font_check_js()}
+{browser_resource_check_js()}
+  await browser.close();
+}})();
+"""
+                        validation_path = Path(tmp) / "pw_validate_wechat.js"
+                        validation_path.write_text(validation_script, encoding="utf-8")
+                        result = run_render_process(
+                            ["node", str(validation_path)], text=True, env=_node_env(),
+                        )
+                    check_render_error(result)
+                    if diagram_reports:
+                        result.stdout += '\n' + '\n'.join(diagram_reports)
+                    if result.returncode != 0:
+                        last_err = result.stderr
+                        continue
                 out_path.write_text(content, encoding="utf-8")
 
         if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:

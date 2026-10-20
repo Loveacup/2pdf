@@ -244,10 +244,18 @@ before Markdown/Obsidian text transforms, so TeX underscores, matrices and `==`
 are not reinterpreted. `$$…$$` is display math. Inline `$…$` follows pandoc
 `tex_math_dollars`: opening is not followed by whitespace, closing is not preceded
 by whitespace nor followed by a digit; escaped `\$` remains a literal dollar.
-Unpaired delimiters are literal. Code fences/spans stay unchanged.
+Unpaired delimiters are literal; a failed inline closing boundary stops that
+candidate instead of consuming later price/formula dollars. Code fences/spans
+and indented code recognized by the Markdown parser stay literal. For multiline
+math in blockquotes/callouts, only enclosing quote prefixes are removed from TeX;
+mathematical `>` operators remain. Heading IDs use authored math source rather
+than temporary extraction tokens, preserving stable authored anchor links.
 
 Only formula-bearing documents load vendored KaTeX JS/CSS/WOFF2 as data URIs.
-Rendering occurs in-page, then awaits fonts and checks visible width. Any formula
+Rendering occurs in-page, then awaits fonts and checks visible width against
+the final DOM after mobile-table conversion; card titles/keys retain formula
+nodes. WeChat inlining retains embedded font at-rules and reloads the exact
+transformed artifact for resource, font, image and formula validation. Any formula
 failure reports ordinal and TeX snippet, exits 3 and preserves the prior target;
 it never changes engines or reaches Pandoc, even with diagram-error waiver.
 `MATH_STAT` records total/rendered. PDF metadata `/JZMathTotal` and

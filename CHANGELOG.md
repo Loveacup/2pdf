@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### P1 复核修复
+
+- **Improved（CR04, CR06, CR14）**：行内公式遇到不能闭合的未转义美元立即停止该候选并继续扫描，价格不再吞掉后续公式；块引用/Callout 只移除包裹公式的引用层级，保留数学 `>`；沿用 Markdown parser 识别缩进、列表、引用与脚注中的代码美元，恢复源文保持逐字一致。标题 slug 从作者公式源码生成，`equation-x2` 等锚点不再含随机 token。
+- **Improved（CR03, CR04, CR09, CR14）**：移动宽表卡片的标题/字段名保留 KaTeX 节点，公式数与成功数按转换后的最终 DOM 重新核对；公众号 CSS 内联保留 KaTeX 字体 at-rule，交付前重新加载实际内联产物，复查资源、图片、实际字体与公式可见性，失败仍不覆盖目标。
+- **Preserved（CR01–CR14）**：不升级依赖、不换 parser/KaTeX、不改普通文档的表格文字节点/内联 CSS 结构；无公式样本导出 HTML 的 body 字节完全一致，完整 HTML 除每次运行的 CSP nonce 外完全一致。默认离线、源文件只读、全部页保留、原子交付和显式 Mermaid 错误豁免报告保持。
+- **Confirmed（CR03, CR04, CR09, CR14）**：六项均先用真实 CLI 复现再修复；价格旧 exit 3→0 且仅渲染 `x`，引用旧 `>x²>`→`x²`，缩进代码恢复 `$x^2$` 字面；公众号最终产物从 0→20 个 `@font-face`/WOFF2，最终实际字体含 KaTeX；430×932 卡片从只剩 `y²` 恢复 `x²/a²/y²` 三节点，PDF 严格对账 3/3；标题两次随机锚点改为稳定 `equation-x2` 并匹配作者链接。已查看相关前后页面/HTML，命令与输出：`/var/folders/47/8_kft2fx0w3bqlcxcppz_3pm0000gn/T/2pdf-p1-review-euijd5oo/acceptance-summary.json`。
+- **Confirmed（CR03–CR14）**：新增 37 项行为回归，渲染用例均标记 integration；上下文回归先 11 failed/1 passed、代码原复现先 1 failed、公众号回归先 5 failed/1 passed，再全部通过。最终完整套件 **260 passed in 178.55s**，含最终 DOM 丢公式、内联后资源/公式失败不交付及普通 HTML 结构兼容。Windows 实机未运行，不声称视觉验收通过。
+
 ### 复核修复
 
 - **Improved（CR04, CR09, CR11）**：授权与读取统一按平台解码 file URL，保留 Windows 盘符与转义字符；资源冻结按无 fragment URL 缓存并回填原 fragment，SVG view 不再丢失。外部 SVG `<use>` 因 Chromium data URI 限制明确报源引用并拒绝，要求将 symbol 内联后使用同文档 `#id`，不再成功交付空图。

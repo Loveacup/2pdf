@@ -24,6 +24,20 @@ def _escaped(text, position):
     return (position - start) % 2 == 1
 
 
+def _formula_source(text, opener, start, end):
+    """Strip only the quote depth enclosing the opening delimiter."""
+    line_start = text.rfind('\n', 0, opener) + 1
+    prefix = re.match(r' {0,3}(?:>[ \t]?)*', text[line_start:opener])[0]
+    depth = prefix.count('>')
+    source = text[start:end]
+    if depth:
+        # The first fragment starts after "$", not at a Markdown line boundary.
+        first, separator, rest = source.partition('\n')
+        rest = re.sub(r'(?m)^' + r' {0,3}>[ \t]?' * depth, '', rest)
+        source = first + separator + rest
+    return source
+
+
 def extract_math(text):
     """Input has code spans/fences protected. Unpaired dollars remain literal."""
     text = re.sub(r'^---\n.*?\n---\n', '', text, flags=re.S)
@@ -54,6 +68,7 @@ def extract_math(text):
             i += 1
             continue
         end = start
+        closed = False
         while True:
             end = text.find('$', end)
             if end < 0:
@@ -63,16 +78,22 @@ def extract_math(text):
                 continue
             if display:
                 if text.startswith('$$', end):
+                    closed = True
                     break
-            elif not text.startswith('$$', end) and not text[end - 1].isspace() and not (end + 1 < len(text) and text[end + 1].isdigit()):
+                end += 1
+            else:
+                closed = (not text.startswith('$$', end)
+                          and not text[end - 1].isspace()
+                          and not (end + 1 < len(text) and text[end + 1].isdigit()))
+                # Never consume another delimiter on a failed inline candidate.
                 break
-            end += 2 if text.startswith('$$', end) else 1
-        if end < 0 or not display and '\n\n' in text[start:end]:
-            i += size
+        if not closed or not display and '\n\n' in text[start:end]:
+            i = end if end >= start else i + size
             continue
         ordinal = len(formulas) + 1
         token = f'JZMATH{nonce}TOKEN{ordinal}END'
-        formulas.append({'index': ordinal, 'source': text[start:end], 'display': display, 'token': token})
+        formulas.append({'index': ordinal, 'source': _formula_source(text, i, start, end),
+                         'display': display, 'token': token})
         out.extend((text[cursor:i], token))
         i = cursor = end + size
     out.append(text[cursor:])
@@ -87,6 +108,18 @@ def restore_math_html(body, formulas):
         node = f'<span class="jz-math" data-math-index="{formula["index"]}" data-display="{display}">{escape(formula["source"])}</span>'
         body = body.replace(formula['token'], node)
     return body
+
+
+def math_slugify(formulas):
+    """Give TOC the authored heading text, never a random extraction token."""
+    from markdown.extensions.toc import slugify
+
+    def source_slug(value, separator):
+        for formula in formulas:
+            value = value.replace(formula['token'], formula['source'])
+        return slugify(value, separator)
+
+    return source_slug
 
 
 def source_formula_count(source):
@@ -170,14 +203,25 @@ def math_check_js():
     const st = window.__mathStatus;
     if (!st) return null;
     await document.fonts.ready;
-    document.querySelectorAll('.jz-math').forEach(node => {
+    const nodes = Array.from(document.querySelectorAll('.jz-math'));
+    const indices = new Set(nodes.map(node => node.dataset.mathIndex));
+    const rendered = new Set();
+    for (const node of nodes) {
       const content = node.querySelector('.katex-html');
-      if (!content) return;
+      if (!content || !node.querySelector('annotation[encoding="application/x-tex"]')) {
+        st.errors.push({index:Number(node.dataset.mathIndex), message:'Rendered formula missing from final DOM', head:node.textContent.slice(0,160)});
+        continue;
+      }
+      rendered.add(node.dataset.mathIndex);
       const rect = content.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0 || rect.left < -1 || rect.right > document.documentElement.clientWidth + 1) {
         st.errors.push({index:Number(node.dataset.mathIndex), message:'Formula is invisible or exceeds page width', head:node.textContent.slice(0,160)});
       }
-    });
+    }
+    if (indices.size !== st.total) {
+      st.errors.push({index:0, message:'Formula count changed in final DOM', head:`expected ${st.total}, found ${indices.size}`});
+    }
+    st.rendered = rendered.size;
     return st;
   });
   if (mathStatus) {
