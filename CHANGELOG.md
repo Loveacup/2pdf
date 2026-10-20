@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### P1 — 数学公式
+
+- **Improved（CR02, CR09, CR10, CR14）**：主 CLI 四格式单一 KaTeX 0.16.22，JS/CSS/20 WOFF2 与 MIT LICENSE 精确 sha256 锁定，由显式 setup 下载/修复，普通转换离线。代码先保护，美元分隔遵循 pandoc 边界，转义美元字面显示；公式在页内以 trust:false/throwOnError:true/strict:error 排版，信任依赖命令拒绝。
+- **Improved（CR06, CR09, CR14）**：公式失败定位序号/TeX 片段、exit 3，无新产物、不覆盖/不换引擎；MATH_STAT 与 PDF 两个公式计数键由 verifier 按同一源解析器三方对账，严格模式拒绝缺 metadata。
+- **Preserved（CR01–CR13）**：现有 Mermaid/parser/deps 不升级；无公式文档不加载数学资源，普通内容/版式不变。P0 资源隔离、原子交付、全部页保留及既有 CLI 参数保持，无新增必需 flag。
+- **Confirmed（CR03, CR09, CR14）**：真实默认 bundled Chromium 将旧原样 TeX 改为分式/矩阵/根式/上下标，源/metadata/成功数 4/4/4；错误函数定位 #1、exit 3 无输出；价格、代码/围栏保持。关键前后页面已查看；普通兼容文档仍 1 页。
+- **Confirmed（CR03–CR14）**：最终完整套件 **200 passed**；包含分隔符/代码/价格保护、TOC 公式副本、四公式对账、错误/信任依赖命令拒绝、缺/篡改 metadata、离线 HTML 无脚本、vendor hash 与 setup 下载修复回归。普通兼容页与旧基线栅格像素完全一致。
+
 ### P1 — Mermaid 与图片就绪
 
 - **Improved（CR03–CR05, CR09）**：字体就绪后布局 Mermaid，打印前强制完成状态、SVG 可见/容器边界及全部图片 decode；移除固定等待与超时继续。PNG/HTML 在初始布局前固定输出视口。IMAGE_STAT 记录解码数量/尺寸。

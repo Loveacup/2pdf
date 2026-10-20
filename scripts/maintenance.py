@@ -21,7 +21,7 @@ RENDERER = SCRIPTS / "md2pdf_chrome.py"
 VENV = Path.home() / ".venvs" / "pdf-skill"
 VENV_PYTHON = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 PYTHON_PACKAGES = ("markdown", "pypdf", "PyYAML", "css-inline")
-JS_PACKAGES = ("mermaid", "highlight.js", "playwright")
+JS_PACKAGES = ("mermaid", "highlight.js", "katex", "playwright")
 
 
 def _version_tuple(value: str) -> tuple[tuple[int, ...], tuple[int, int]]:
@@ -121,7 +121,7 @@ def _vendor_current() -> dict[str, str]:
         return {}
     result = {}
     for name, info in lock.items():
-        if name not in ("mermaid", "highlight.js") or not isinstance(info, dict):
+        if name not in ("mermaid", "highlight.js", "katex") or not isinstance(info, dict):
             continue
         filename, version, expected = info.get("file"), info.get("version"), info.get("sha256")
         if not all(isinstance(value, str) and value for value in (filename, version, expected)):
@@ -141,7 +141,7 @@ def _vendor_pins() -> dict[str, str]:
     except (OSError, json.JSONDecodeError):
         return {}
     return {name: info["version"] for name, info in lock.items()
-            if name in ("mermaid", "highlight.js") and isinstance(info, dict)
+            if name in ("mermaid", "highlight.js", "katex") and isinstance(info, dict)
             and isinstance(info.get("version"), str)}
 
 
@@ -270,7 +270,7 @@ def _preflight_status() -> dict[str, str] | None:
 
 def _required_resources_ready() -> bool:
     checks = _preflight_status()
-    required = ("playwright:bundled", "mermaid-vendor", "hljs-vendor")
+    required = ("playwright:bundled", "mermaid-vendor", "hljs-vendor", "katex-vendor")
     return checks is not None and all(checks.get(name) == "ok" for name in required)
 
 

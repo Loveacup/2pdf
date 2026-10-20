@@ -48,12 +48,12 @@ for page in reader.pages:
 
 ## Markdown to Beautiful PDF (CJK-safe)
 
-Convert Obsidian Flavored Markdown to styled PDF with perfect Chinese/Japanese/Korean rendering.
+Convert Obsidian Flavored Markdown to styled PDF using Chromium/system CJK fonts, with actual font diagnostics and platform-specific visual acceptance.
 
 **Script**: `scripts/md2pdf_chrome.py`
 **Prerequisites**: From the standalone repository root, run `python3 scripts/maintenance.py init`. It reuses a healthy `~/.venvs/pdf-skill`; explicit setup may install missing packages and download Chromium/pinned vendor assets. Ordinary conversions are offline by default and never download missing vendor assets. Node.js and a launchable Playwright Chromium or system Chrome are required.
 
-`python3 scripts/maintenance.py check-updates [--json]` queries official PyPI/npm metadata for runtime packages and bundled Mermaid/highlight.js, plus the Playwright package resolved by the current Node setup. It reports reminders only and never installs upgrades. JSON uses schema version 1 (`checked_at`, `overall`, `updates` with `name/source/current/pinned/latest/status/update_available/url`); unavailable metadata or installed versions are marked `unavailable`, and the command exits nonzero when any version cannot be verified.
+`python3 scripts/maintenance.py check-updates [--json]` queries official PyPI/npm metadata for runtime packages and bundled Mermaid/highlight.js/KaTeX, plus the Playwright package resolved by the current Node setup. It reports reminders only and never installs upgrades. JSON uses schema version 1 (`checked_at`, `overall`, `updates` with `name/source/current/pinned/latest/status/update_available/url`); unavailable metadata or installed versions are marked `unavailable`, and the command exits nonzero when any version cannot be verified.
 
 Avoid relying on legacy automatic bootstrap for installation: when a direct render starts without Markdown dependencies, it may create a persistent environment and install unpinned package versions. Use the explicit maintenance command to initialize; ordinary conversion does not run dependency upgrades.
 
@@ -95,15 +95,15 @@ python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin 
 | `--format pdf\|png\|html\|wechat` | Output format. `pdf` (default), `png` (full-page screenshot), `html` (standalone), `wechat` (CSS inlined for WeChat paste) |
 | `--browser playwright\|chrome\|auto` | `playwright` (default, bundled Chromium); `chrome` (system Chrome via Playwright `executablePath`); `auto` tries bundled → system Chrome. All use the same resource policy and fresh context, never a personal profile. Prints actual `engine` + `executable` |
 | `--page-size A4\|WxH` | `A4` (default) or a custom mobile size like `430x932`. Validated up front |
-| `--setup` | One-time idempotent bootstrap: persistent venv + deps + Playwright Chromium + pinned vendor assets (mermaid/hljs, `vendor.lock.json`) + smoke render acceptance. Alias: `--preflight --fix` |
+| `--setup` | One-time idempotent bootstrap: persistent venv + deps + Playwright Chromium + pinned vendor assets (Mermaid/hljs/KaTeX JS, CSS, WOFF2 and license; `vendor.lock.json`) + smoke render acceptance. Alias: `--preflight --fix` |
 | `--preflight [--json]` | Health-check current interpreter, deps, browsers, pandoc, vendored assets, persistent venv — no rendering. Exit 0 ok / 1 fatal / 2 missing doc |
-| `--verify` | Verify the staged PDF in a separate process before delivery: file size/magic, page count, Mermaid-source leak/error text, diagram counts, metadata. Any error exits nonzero; warnings and skipped checks remain diagnostic |
-| `--verify-strict` | Implies `--verify`; also fails when a **required** check is skipped (e.g. missing `pypdf`, or missing diagram-count metadata for a Mermaid source). Optional/not-applicable checks may skip. A legitimate image-only page does not fail |
+| `--verify` | Verify staged PDF file/magic/pages, Mermaid-source/error text, diagram/formula counts and metadata. Formula counts compare source parser ↔ PDF total ↔ rendered. Any error fails; warnings/skips remain diagnostic |
+| `--verify-strict` | Implies `--verify`; also fails skipped required checks (e.g. pypdf or diagram/formula-count metadata for relevant source). Optional/not-applicable checks may skip. Image-only pages remain valid |
 | `--require-text TEXT` | Repeatable PDF body-text sentinel; implies `--verify`. Missing text fails delivery. Opt in to the expected source content; text is not inferred from image pixels |
 | `--allow-diagram-errors` | Explicit waiver for completed Mermaid runs with failed blocks (default: **exit 3, no output**). Prints `MERMAID_WAIVER` with honest total/rendered/errors and visible failure placeholders. Timeouts never proceed; `--verify` still rejects count mismatches |
 | `--no-bootstrap` | Disable the automatic venv self-healing re-exec |
 | `--fallback pandoc` | **Breaking change (P0-B): refuses conversion.** The old pandoc/Chrome CLI path cannot enforce the same request policy. Migrate to `--browser chrome` / `auto`, or initialize bundled Chromium |
-| `--no-metadata` | Skip writing source frontmatter into PDF metadata (including diagram-count keys) |
+| `--no-metadata` | Skip source frontmatter and diagram/formula-count PDF metadata. Combining with strict verification on diagram/formula documents fails the required count check |
 | `--properties` | Render YAML frontmatter as a title-adjacent property card; list values use `·`, while `author`, `cli`, and `models` remain in the byline |
 | `--byline` | Render frontmatter `author`, `cli`, and `models` beneath H1 as 撰写 / 协作 CLI / 参与模型 rows; missing fields are omitted |
 | `--preview DIR` | Export page 1 and pages containing named Mermaid charts as 72-dpi PNGs; print their paths |
@@ -134,6 +134,22 @@ failures stop atomic delivery; macOS also checks CoreText glyph IDs for each
 text node's actual fonts. No system font is bundled or downloaded. Inspect final
 pages as well: font-ready and cmap coverage alone do not prove visual correctness.
 macOS P1 corpus is verified; Windows is explicitly **not yet visually verified**.
+
+### Math (primary CLI, all four output formats)
+
+No new flag: `$$…$$` is display math, `$…$` inline math. Dollar boundaries follow
+pandoc `tex_math_dollars`: inline opening `$` cannot be followed by whitespace;
+closing `$` cannot be preceded by whitespace or followed by a digit. `\$` is a
+literal dollar; fenced/inline code is protected first. Unpaired delimiters stay
+literal. Supported TeX is [KaTeX's function subset](https://katex.org/docs/supported),
+with pinned **0.16.22**, `strict: "error"`, `trust: false`, `throwOnError: true`.
+Trust-dependent HTML/URL/image commands are rejected. No formula HTML/scripts run.
+Invalid/unsupported formulas report ordinal + TeX snippet and exit 3 without
+publishing or falling back; `--allow-diagram-errors` does not waive formula errors.
+JS/CSS/WOFF2 fonts are pinned/hash-checked local vendor; explicit setup provisions
+them with the MIT license. Ordinary no-formula documents load no math assets.
+`MATH_STAT` and `/JZMathTotal` / `/JZMathRendered` reconcile source/render counts.
+
 
 ### Claude Code Relay Workflow
 

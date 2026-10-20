@@ -28,6 +28,9 @@ from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_htm
                              browser_policy_js, browser_resource_check_js)
 from print_layout import prepare_print_js, print_viewport_js
 from font_readiness import font_check_js, check_font_report
+from math_rendering import (extract_math, restore_math_html, math_assets, math_check_js,
+                            MathRenderError, format_math_errors, katex_manifest,
+                            vendor_bytes as math_vendor_bytes, ensure_katex_vendor)
 
 # 支持的输出格式
 VALID_FORMATS = ("pdf", "png", "html", "wechat")
@@ -507,6 +510,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
     md_text = apply_directives(md_text, directives or [])
     # M1.1 fence-first：保护代码围栏/行内代码 → 文本转换 → 回填
     md_text, _code_store = protect_code_spans(md_text)
+    md_text, formulas = extract_math(md_text)
     md_text = preprocess_markdown(md_text)
     # Embed local images as base64 data URIs
     md_text = embed_local_images(md_text, md_path.parent, policy)
@@ -529,6 +533,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
             "footnotes",
         ],
     )
+    body = restore_math_html(body, formulas)
 
     # Convert mermaid code blocks to <div class="mermaid">
     body = re.sub(
@@ -1038,6 +1043,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
 <link rel="stylesheet" href="{_hljs_css_src(effective_theme)}">
 <script src="{_hljs_js_src()}"></script>
 <script>hljs.highlightAll();</script>
+{math_assets(formulas)}
 {mermaid_script}
 </head>
 <body class="{body_class}">
@@ -1329,6 +1335,7 @@ const {{ chromium }} = require('playwright');
 {print_viewport_js(page_size)}
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
   await page.evaluate(async () => {{ await document.fonts.ready; }});
+{math_check_js()}
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
 {local_image_check_js()}
 {font_check_js()}
@@ -1365,9 +1372,11 @@ const {{ chromium }} = require('playwright');
             raise RuntimeError(result.stderr.strip())
         if result.returncode == 7:
             raise RuntimeError(result.stderr.strip())
+        if result.returncode == 8:
+            raise MathRenderError(format_math_errors(result.stderr))
         if result.returncode == 0 and pdf_path.exists() and pdf_path.stat().st_size >= 1024:
             check_font_report(result.stdout)
-            for label in ('IMAGE_STAT', 'MERMAID_WAIVER'):
+            for label in ('IMAGE_STAT', 'MERMAID_WAIVER', 'MATH_STAT'):
                 record = re.search(label + r":(.*)", result.stdout)
                 if record:
                     print(label + ":" + record.group(1), file=sys.stderr)
@@ -1375,7 +1384,11 @@ const {{ chromium }} = require('playwright');
             if scale_match:
                 for item in json.loads(scale_match.group(1)):
                     print(f"  ⚠️  Mermaid 图 #{item['index']} 缩放至 {item['scale']:.0%}（低于 60%）")
-            return _parse_mermaid_stat(result.stdout)
+            stat = _parse_mermaid_stat(result.stdout) or {}
+            math_stat = re.search(r"MATH_STAT:(.*)", result.stdout)
+            if math_stat:
+                stat['math'] = json.loads(math_stat.group(1))
+            return stat or None
         last_err = result.stderr
         if idx < len(plan) - 1:
             print(f"  ⚠️  {engine} 渲染失败，降级下一引擎", file=sys.stderr)
@@ -1434,12 +1447,17 @@ def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None,
     # 源笔记 frontmatter → PDF metadata（独立一步，无标题文档也写）
     # M1.4 附带写入 mermaid 图数统计，供 verify_pdf 做「源图数↔成功渲染数」对账
     if write_metadata:
-        extra = None
-        if diagram_stat:
-            extra = {
-                "/JZDiagramTotal": str(diagram_stat.get("total", "")),
-                "/JZDiagramRendered": str(diagram_stat.get("rendered", "")),
-            }
+        extra = {}
+        if diagram_stat and 'total' in diagram_stat:
+            extra.update({
+                "/JZDiagramTotal": str(diagram_stat["total"]),
+                "/JZDiagramRendered": str(diagram_stat["rendered"]),
+            })
+        if diagram_stat and 'math' in diagram_stat:
+            extra.update({
+                "/JZMathTotal": str(diagram_stat['math']['total']),
+                "/JZMathRendered": str(diagram_stat['math']['rendered']),
+            })
         add_pdf_metadata(pdf_path, md_path, extra=extra)
 
 
@@ -1807,9 +1825,9 @@ def _ensure_vendor(force=False):
             urllib.request.urlretrieve(url, str(path))
             _record_vendor(name, ver, path)
         except Exception as e:
-            print(f"  ⚠️  {name} 下载失败（渲染时回退 CDN）: {e}", file=sys.stderr)
+            print(f"  ⚠️  {name} 下载失败（离线转换将拒绝缺失资源）: {e}", file=sys.stderr)
             ok = False
-    return ok
+    return ensure_katex_vendor(force=force) and ok
 
 
 _SMOKE_MD = """---
@@ -1996,6 +2014,13 @@ def run_preflight(md_path=None, want_format="pdf", as_json=False, browser="playw
         f"mermaid {MERMAID_PIN} 本地副本缺失（显式运行 maintenance.py init；普通转换不回退 CDN）")
     chk("hljs-vendor", okwarn(HLJS_LOCAL.exists()),
         "highlight.js 本地副本缺失（显式运行 maintenance.py init；普通转换不回退 CDN）")
+    try:
+        for name in katex_manifest():
+            math_vendor_bytes(name)
+        math_vendor_ok = True
+    except (ResourceError, OSError, ValueError):
+        math_vendor_ok = False
+    chk("katex-vendor", okwarn(math_vendor_ok), "KaTeX pinned 资源缺失或 hash 不符；显式运行 maintenance.py init")
     chk("venv:persistent", okwarn(_venv_python().exists()),
         f"持久 venv 未建（{VENV_DIR}）；跑 python3 scripts/maintenance.py init")
 
@@ -2257,6 +2282,7 @@ const {{ chromium }} = require('playwright');
   await page.setViewportSize({{width: {view_w}, height: 1000}});
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
   await page.evaluate(async () => {{ await document.fonts.ready; }});
+{math_check_js()}
 {common_wait}
 {local_image_check_js()}
 {font_check_js()}
@@ -2282,6 +2308,8 @@ const {{ chromium }} = require('playwright');
             raise RuntimeError(result.stderr.strip())
         if result.returncode == 7:
             raise RuntimeError(result.stderr.strip())
+        if result.returncode == 8:
+            raise MathRenderError(format_math_errors(result.stderr))
 
         if fmt in ("html", "wechat"):
             out = result.stdout
@@ -2294,7 +2322,7 @@ const {{ chromium }} = require('playwright');
 
         if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
             check_font_report(result.stdout)
-            for label in ('IMAGE_STAT', 'MERMAID_WAIVER'):
+            for label in ('IMAGE_STAT', 'MERMAID_WAIVER', 'MATH_STAT'):
                 record = re.search(label + r":(.*)", result.stdout)
                 if record:
                     print(label + ":" + record.group(1), file=sys.stderr)
@@ -2395,7 +2423,7 @@ if __name__ == "__main__":
             resource_roots=args["resource_roots"],
             allowed_origins=args["allowed_origins"],
         )
-    except MermaidRenderError as e:
+    except (MermaidRenderError, MathRenderError) as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(3)
     except (LocalImageError, ResourceError, DeliveryError, RuntimeError, OSError) as e:

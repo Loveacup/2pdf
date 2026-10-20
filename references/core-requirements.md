@@ -19,3 +19,4 @@
 | CR11 | **跨平台**：macOS 与 Windows 路径（空格、Unicode、引号）正确转义；使用平台临时目录，不硬编码 `/tmp`、用户目录或 CLI 专属路径。 |
 | CR12 | **preflight 合同**：`--preflight [--json]` 不渲染；退出码 0 可用或仅 WARN、1 存在 FAIL、2 指定源文档不存在；JSON 含 `checks[{name,status,hint}]` 与 `overall ∈ ok/degraded/fail`。 |
 | CR13 | **源文件只读**：用户原始 Markdown 与资源不被修改；输出只写到推导或指定的目标路径。 |
+| CR14 | **数学公式（主排版 CLI）**：PDF/PNG/HTML/公众号采用单一 KaTeX 0.16.22，支持其 TeX 函数子集并使用 strict:error、trust:false、throwOnError:true；信任依赖的 HTML/URL/图片命令拒绝，不执行嵌入 HTML/脚本。代码围栏/行内代码先保护；`$$…$$` 行间、`$…$` 行内按 pandoc tex_math_dollars 边界，`\$` 为字面美元。公式失败报序号/源码片段、exit 3，不降级/不交付；源解析数、渲染数与 PDF `/JZMathTotal`、`/JZMathRendered` 由 verifier 对账。无公式文档不加载公式资源、不改变版式；KaTeX JS/CSS/WOFF2 与 MIT LICENSE 精确版本/sha256 锁定，显式 setup 下载，普通转换离线。 |

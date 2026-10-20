@@ -1,6 +1,6 @@
 # 2pdf 排版优化路线图
 
-> 本文基于 2pdf 基线源码、文档和固定上游提交制定分阶段合同。**P0-A/P0-B 已按下方证据实施；P1/P2 尚未实施**，不作性能承诺。在兼容性证据充分前，不替换 Chromium 主链。PDF 合并、拆分、旋转、水印、加密、表单读取/填写及基础提取属于独立能力链，本路线图不迁移、不裁剪它们。
+> 本文基于 2pdf 基线源码、文档和固定上游提交制定分阶段合同。**P0-A/P0-B 与 P1 五项已按下方证据实施；P1 的 Windows 视觉验收未运行，明确未验收；P2 未启动**，不作性能承诺。不替换 Chromium 主链。PDF 合并、拆分、旋转、水印、加密、表单读取/填写及基础提取属于独立能力链，本路线图不迁移、不裁剪它们。
 
 ## 结论摘要
 
@@ -32,7 +32,7 @@
 
 ## 审核结论与实施边界
 
-本方案按 **P0-A → P0-B → P1 → P2** 分阶段交付。先防止内容损失，再处理隔离与资源边界，最后改善版式。P0-A/P0-B 的已实现接口及证据见文末；P1/P2 仍是待实现合同。
+本方案按 **P0-A → P0-B → P1 → P2** 分阶段交付。先防止内容损失，再处理隔离与资源边界，最后改善版式。P0-A/P0-B 与 P1 五项的接口及证据见文末；P1 Windows 视觉仍未验收，P2 未启动。
 
 2026-09-29 审核实测：临时构造两页 PDF，第一页为可见蓝色矢量图形，第二页为 `Signed: Alex`。直接调用当时的 `remove_blank_pages()`，结果为 `before 2 / removed 2 / after 0`。这是函数级复现，不扩大为所有正常转换均会失败；输入均为合成素材。旧规则会删除任意无可抽取文本页，以及少于 50 字的尾页；P0-A 已停止此行为。
 
@@ -97,8 +97,8 @@
 
 - 上游源码与许可证链接保留固定 SHA；本方案不引用未经测量的性能结论。
 - 本地源码引用行号仅用于导航，以函数实际行为为准。
-- **P0-A/P0-B（2026-10-20）已交付，P1/P2 未开始**。PDF 编辑、表单链及分页策略未改；未升级依赖或替换解析器。P0-A 保留全部生成页并增加 `--verify-strict`、`--require-text`；P0-B 增加全格式私有暂存、非阻塞输出所有权、`--resource-root`、默认离线及 `--allow-origin`，主/legacy 共享同等资源与交付边界。旧 pandoc 救生艇明确拒绝，迁移指导见下。
-- **P1 分页语义（2026-10-20）已实施**：全级标题与首内容相邻、短块按实际可打印高度 keep、长块允许拆分；图片适配页宽/页高，保留显式分页。其余 P1 项继续按顺序实施；P2 不在范围。
+- **P0-A/P0-B（2026-10-20）已交付**。该两阶段未改分页策略、未升级依赖或替换解析器；PDF 编辑/表单链保持独立。P0-A 保留全部生成页并增加 `--verify-strict`、`--require-text`；P0-B 增加全格式私有暂存、非阻塞输出所有权、`--resource-root`、默认离线及 `--allow-origin`，主/legacy 共享资源与交付边界。旧 pandoc 救生艇明确拒绝，迁移指导见下。
+- **P1 五项（2026-10-20）已依序单独实施**：分页 → 表格 → 字体 → Mermaid/图片就绪 → 数学。macOS 合成矩阵、前后页面和普通文档兼容证据见各项；Windows 视觉验收没有运行，明确未验收。未换 parser、未升级既有依赖、未启动 P2。
 
 ### P1 环境与分页验收
 
@@ -145,6 +145,58 @@ errors=1，并显示失败占位，不宣称成功。超时不再继续打印；
 已 pinned 本地 vendor，P0-B 离线零请求完整回归保持。普通兼容文档仍 1 页。
 
 完整套件 `pytest -c tests/pytest.ini tests -q`：171 passed。
+
+### P1 数学与阶段结论
+
+数学项已实施。决策为单一 KaTeX 0.16.22 支持的 TeX 函数子集，strict:error、
+trust:false、throwOnError:true；信任依赖的 HTML/URL/图片命令拒绝。
+`math-final/` 与 `baseline/` 页面对照：原样 TeX → 正确分式/矩阵/根式/上下标，
+源解析/PDF total/rendered 为 4/4/4；不以 PDF 文本复原 TeX 作为验收。
+错误函数真实 CLI 定位公式 #1、源码片段，exit 3 无产物；代码/围栏和价格
+不计为公式。KaTeX JS/CSS/20 WOFF2 与 MIT LICENSE 全部锁 hash，由 setup
+显式下载；普通转换无网络、文档脚本不执行。普通无公式样本前后仍 1 页，栅格像素完全一致。
+
+五项均有前后页面、内容对账及兼容性记录；黄金样例接受可解释的分页/表头/公式
+变化，不要求旧页数永久不变。macOS 已完成本轮可运行验收；**Windows 实机不可用，
+所以 Windows 字体/视觉验收未运行，不声称通过**。这不是 P2 引擎实验的授权。
+
+最终完整套件：**200 passed**（`pytest-p1-final.txt`，112.00s）；前一轮新增
+TOC 样本发现系统 UI 字体的 ASCII 括号由浏览器合成，CoreText cmap 不足以判
+缺字，已改由 Chromium raster/notdef 检查 ASCII，非 ASCII 保留 native 补充；
+最终完整套件覆盖此修正。PDF metadata 数量篡改（含 total/rendered 同时改错）、
+严格缺 metadata、错误公式/信任命令无产物/不覆盖、离线 HTML/无脚本、
+setup 下载/缓存/损坏 hash 修复均通过。
+
+受控环境为 macOS 27.0.1 arm64、Playwright 1.58.2 / Chromium 145.0.7632.6，
+主题 blue / A4；Python 依赖与原始 vendor hashes 见 `environment.json`，
+新增 KaTeX hashes 见 `vendor-final.json`。实际字体版本见
+`actual-font-versions-coretext.json`：SF NS 22.0d5e1、PingFang 21.0d1e1、
+Apple Color Emoji 22.0d3e2、Noto Sans SC 0.00 (2017-07-30)、
+Menlo 22.0d2e1、STIX Two Math 2.13 b171；未复制系统字体。
+`acceptance-summary.json` 汇总页数（分页 10→10、表格 7→7、字体 1→1、
+图表 1→2、数学 1→1）、metadata 与兼容结果。图表页数变化含旧基线的
+少字尾页删除缺陷，不把 P0-A 的保护误记为本项新删页行为。
+
+复跑命令（所有输入/输出使用独立临时目录，不改用户文件）：
+
+```bash
+PY=~/.venvs/pdf-skill/bin/python
+# 生成本轮同一合成矩阵，E 需为独立临时目录
+$PY -c "import sys;sys.path.insert(0,'tests');from p1_samples import samples;samples('$E/samples')"
+$PY -m pytest -c tests/pytest.ini tests -q
+# 分项完整套件结果：165 / 167 / 169 / 171 / 最终 200 passed
+$PY scripts/md2pdf_chrome.py "$E/samples/math.md" "$E/math.pdf" --browser playwright --theme blue --verify-strict
+$PY scripts/verify_pdf.py "$E/math.pdf" --src "$E/samples/math.md" --strict --json
+pdftoppm -scale-to 900 -png "$E/math.pdf" "$E/math-page"
+# 原路径同 argv（去掉旧版本不支持的 --verify-strict）在只读 a75fd4c worktree 运行。
+# commands.json 保存验收真实 argv/退出码/stdout/stderr；各分项目录保留 PDF、全部页面 PNG。
+```
+
+`_ensure_vendor()` 在现有 pinned 资源下实际 exit 0；另以其 KaTeX 下载 helper
+`ensure_katex_vendor(force=True)` 实际下载并逐个校验全部新增资源，exit 0，
+命令与结果见 `setup-katex-download.json`。未重装浏览器、未升级既有依赖。
+
+
 
 
 ### P0-A 验收记录
@@ -219,5 +271,5 @@ pdftoppm -f 1 -singlefile -scale-to 900 -png "$E/artifacts/test_real_cli_roots_u
 
 **Breaking / 迁移：** 旧远程图片需本地化或逐来源 `--allow-origin`；旧根外资源需 `--resource-root`；任意文档脚本不再运行；缺 vendor 须显式初始化；`--fallback pandoc` 因无法实施等价资源策略而拒绝，改用 `--browser chrome/auto` 或准备 bundled Chromium。联网模式只允许已授权资源在 Python 中冻结；离线模式不进行外部请求。二者均不继承个人浏览器状态，不承诺约束远端服务内部转发。
 
-**阶段结论：** P0-B 五项合同及阶段完成条件均已实测满足；完整套件通过。未运行 Windows 实机，不声称新增 Windows 实机证据；保留跨平台代码与路径行为回归。P1/P2 未开始。
+**阶段结论：** P0-B 五项合同及阶段完成条件均已实测满足；完整套件通过。未运行 Windows 实机，不声称新增 Windows 实机证据；保留跨平台代码与路径行为回归。P1 后续证据见上，P2 未启动。
 

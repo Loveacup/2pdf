@@ -169,7 +169,7 @@ below 60% of their natural size produce a render-stage warning naming the block.
 
 - **Persistent venv**: `~/.venvs/pdf-skill`, shared by all CLI runtimes (they symlink the same canonical skill). Dependency-less interpreters auto re-exec into it (`JZ2PDF_REEXEC` guards loops; `--no-bootstrap` disables)
 - **`--setup`**: idempotent bootstrap — venv + deps + Playwright Chromium + vendored assets + smoke render acceptance (the per-machine cross-platform guarantee)
-- **Vendored assets**: mermaid + highlight.js (+ per-theme hljs CSS) pinned & sha256-locked in `vendor.lock.json`; downloaded files live next to `scripts/` and are gitignored
+- **Vendored assets**: Mermaid + highlight.js (+ themes), and KaTeX 0.16.22 JS/CSS/20 WOFF2 faces are pinned & sha256-locked in `vendor.lock.json`; downloaded files are gitignored. KaTeX's MIT `scripts/katex/LICENSE` is kept. `_ensure_vendor()` provisions all KaTeX assets only during explicit setup; runtime rejects missing/hash-mismatched assets and never falls back to CDN.
 - **Cross-platform**: Windows venv layout (`Scripts\python.exe`), `%ProgramFiles%` Chrome discovery, `%LOCALAPPDATA%\ms-playwright` cache detection, platform temp dir instead of `/tmp`, YaHei/Consolas font fallbacks
 
 ## Obsidian Callout Support
@@ -207,8 +207,8 @@ Styling features in the script:
 
 | Method | CJK Support | Notes |
 |--------|-------------|-------|
-| Playwright bundled Chromium | Perfect | **Default** (`--browser playwright`); uses system fonts natively |
-| System Chrome | Perfect | `--browser chrome`, or `auto` fallback when bundled Chromium can't launch |
+| Playwright bundled Chromium | macOS P1 corpus verified | **Default**; actual font evidence recorded, Windows visual acceptance pending |
+| System Chrome | System-font dependent | Explicit choice / auto fallback; separate from the controlled bundled baseline |
 | WeasyPrint | Broken on macOS | Font embedding bug — text extraction OK but visual garbled |
 | pandoc + LaTeX | OK if fonts configured | Requires CJK LaTeX packages |
 
@@ -230,3 +230,30 @@ are bundled or downloaded. macOS corpus passed; Windows remains unverified.
 ## Page Headers/Footers
 
 To add page headers/footers with page numbers, use `scripts/md2pdf_browser.py` (Playwright version) which supports `displayHeaderFooter`.
+
+## P1 Math (primary renderer)
+
+The single engine is KaTeX **0.16.22**. [Supported functions](https://katex.org/docs/supported)
+define the TeX subset; [options](https://katex.org/docs/options) are fixed at
+`trust: false`, `throwOnError: true`, `strict: "error"` (warnings become errors).
+Commands requiring trusted HTML/URLs/images are rejected before rendering.
+Macros are per-formula, not shared; author HTML/scripts never execute.
+
+After existing fence-first code protection, the dollar scanner extracts formulas
+before Markdown/Obsidian text transforms, so TeX underscores, matrices and `==`
+are not reinterpreted. `$$…$$` is display math. Inline `$…$` follows pandoc
+`tex_math_dollars`: opening is not followed by whitespace, closing is not preceded
+by whitespace nor followed by a digit; escaped `\$` remains a literal dollar.
+Unpaired delimiters are literal. Code fences/spans stay unchanged.
+
+Only formula-bearing documents load vendored KaTeX JS/CSS/WOFF2 as data URIs.
+Rendering occurs in-page, then awaits fonts and checks visible width. Any formula
+failure reports ordinal and TeX snippet, exits 3 and preserves the prior target;
+it never changes engines or reaches Pandoc, even with diagram-error waiver.
+`MATH_STAT` records total/rendered. PDF metadata `/JZMathTotal` and
+`/JZMathRendered` are checked against the same source scanner by `verify_pdf.py`.
+Missing formula metadata is a required skip under strict verification.
+`--no-metadata` intentionally disables these keys and therefore cannot strictly
+verify a formula-bearing source. Ordinary no-formula pages remain visually
+compatible; dynamic PDF metadata is not a byte-identity contract.
+

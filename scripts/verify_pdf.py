@@ -10,6 +10,7 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
+from math_rendering import source_formula_count
 
 MERMAID_RE = re.compile(
     r"graph\s+(TD|LR|TB|RL|BT)\b|sequenceDiagram|flowchart\s+(TD|LR|TB|RL|BT)"
@@ -62,7 +63,7 @@ def verify(pdf, src_md=None, required_text=()):
     try:
         from pypdf import PdfReader
     except ImportError:
-        for name in ("pages", "mermaid_leak", "mermaid_bomb", "diagram_count", "required_text"):
+        for name in ("pages", "mermaid_leak", "mermaid_bomb", "diagram_count", "math_count", "required_text"):
             check(name, "skipped", "pypdf 未安装，无法完成页级检查", name != "required_text" or bool(required_text))
         return _result(pdf, checks)
 
@@ -88,10 +89,12 @@ def verify(pdf, src_md=None, required_text=()):
             present = bool(meta.get("/Title") or meta.get("/Author"))
             check("pdf_metadata", "passed" if present else "warn", "源 frontmatter 的 PDF metadata 检查", False)
         expected_diagrams = False
+        expected_math = None
         if src_md:
             try:
                 source = Path(src_md).read_text(encoding="utf-8")
                 expected_diagrams = bool(re.search(r"^\s*(?:`{3,}|~{3,})mermaid\b", source, re.M))
+                expected_math = source_formula_count(source)
             except OSError as exc:
                 check("source", "skipped", f"无法读取源文件: {exc}")
         total, rendered = meta.get("/JZDiagramTotal"), meta.get("/JZDiagramRendered")
@@ -100,6 +103,19 @@ def verify(pdf, src_md=None, required_text=()):
         else:
             check("diagram_count", "passed" if str(total) == str(rendered) else "error",
                   f"源 {total} 个、成功渲染 {rendered} 个")
+        math_total, math_rendered = meta.get("/JZMathTotal"), meta.get("/JZMathRendered")
+        if math_total is None or math_rendered is None:
+            check("math_count", "skipped", "公式数量 metadata 缺失" if expected_math else "源文无公式，无需公式对账", bool(expected_math))
+        else:
+            try:
+                total_number, rendered_number = int(math_total), int(math_rendered)
+                reconciled = total_number == rendered_number and total_number >= 0
+                if expected_math is not None:
+                    reconciled = reconciled and total_number == expected_math
+                check("math_count", "passed" if reconciled else "error",
+                      f"源解析 {expected_math}，记录 {total_number}，成功渲染 {rendered_number}")
+            except (TypeError, ValueError):
+                check("math_count", "error", "公式数量 metadata 非合法整数")
     except Exception as exc:
         check("parse", "error", f"PDF 解析失败: {exc}")
     return _result(pdf, checks)
