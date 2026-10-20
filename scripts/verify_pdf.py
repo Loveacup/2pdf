@@ -1,28 +1,16 @@
 #!/usr/bin/env python3
-"""PDF 交付质量门（最小集）。
+"""PDF delivery gate. Strict mode rejects skipped required checks, not warnings.
 
-可独立 CLI 运行，也可被 md2pdf_chrome.py --verify 调用。
-设计原则：任何依赖缺失只降级为 skipped，绝不抛错中断主流程。
-
-检查项（P0 最小集，对应实战痛点）：
-  - filesize    文件 < 1KB 视为渲染失败          (error)
-  - magic       %PDF- 魔数                        (error)
-  - pages       页数 >= 1                          (error；缺 pypdf → skipped)
-  - mermaid_leak Mermaid 源码残留(图没渲成 SVG)   (error)
-  - mermaid_bomb Mermaid 错误炸弹文本印进成品     (error；模糊匹配抗字符重复)
-  - diagram_count 源图数↔成功渲染数 metadata 对账 (error；缺 metadata 键则跳过)
-  - first_page  首页可提取文本                      (warn)
-  - pdf_metadata 源有 frontmatter 但 metadata 空   (warn)
-
-深度项（横向溢出/字号分布/尺寸偏差）依赖重库且阈值脆，归 --verify-deep，默认不跑。
+Text extraction and visual inspection are separate evidence: an image-only page
+is valid. Optional caller-supplied text sentinels check expected body content.
 """
+import argparse
+import json
 import re
 import sys
-import json
 import unicodedata
 from pathlib import Path
 
-# Mermaid 源码特征：渲染失败时源码会以纯文本漏进正文
 MERMAID_RE = re.compile(
     r"graph\s+(TD|LR|TB|RL|BT)\b|sequenceDiagram|flowchart\s+(TD|LR|TB|RL|BT)"
     r"|stateDiagram|classDiagram|erDiagram|gantt\b|pie\s+title"
@@ -30,138 +18,131 @@ MERMAID_RE = re.compile(
 
 
 def _fuzzy_pattern(s):
-    """错误炸弹文本在 PDF 提取时常出现字符重复（如 SSyynnttaaxx），
-    对每个字符放宽到 1-2 次重复做模糊匹配。空格放宽为任意空白。"""
-    parts = []
-    for c in s:
-        if c == " ":
-            parts.append(r"\s{1,2}")
-        else:
-            parts.append(re.escape(c) + "{1,2}")
-    return "".join(parts)
+    return "".join(r"\s{1,2}" if c == " " else re.escape(c) + "{1,2}" for c in s)
 
 
-# M1.4 Mermaid 错误炸弹特征（2026-07-02 事故直接漏检项）：
-# 渲染失败时 mermaid 的错误 SVG 含 "Syntax error in text / mermaid version x.y.z"
 ERROR_BOMB_RE = re.compile(
-    _fuzzy_pattern("Syntax error") + "|" + _fuzzy_pattern("mermaid version"),
-    re.IGNORECASE,
+    _fuzzy_pattern("Syntax error") + "|" + _fuzzy_pattern("mermaid version"), re.IGNORECASE
 )
 
 
 def _has_frontmatter(md_path):
     try:
-        return bool(re.match(r"^---\n", Path(md_path).read_text(encoding="utf-8", errors="ignore")))
-    except Exception:
+        return bool(re.match(r"^---\n", Path(md_path).read_text(encoding="utf-8")))
+    except OSError:
         return False
 
 
-def verify(pdf, src_md=None):
-    """返回 {pdf, findings:[(name,level,msg)], summary:{error,warn,skipped}}。"""
+def _normalized_text(text):
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).strip()
+
+
+def verify(pdf, src_md=None, required_text=()):
+    """Return legacy findings/summary plus explicit check statuses and requiredness."""
     pdf = Path(pdf)
-    f = []
-    if not pdf.exists():
-        f.append(("exists", "error", f"PDF 不存在: {pdf}"))
-        return _result(pdf, f)
-    size = pdf.stat().st_size
-    if size < 1024:
-        f.append(("filesize", "error", f"{size}B 疑似渲染失败"))
+    checks = []
+
+    def check(name, status, reason, required=True):
+        checks.append({"name": name, "status": status, "reason": reason, "required": required})
+
+    if not pdf.is_file():
+        check("exists", "error", f"PDF 不存在或不是文件: {pdf}")
+        return _result(pdf, checks)
+    check("exists", "passed", "PDF 文件存在")
     try:
-        head = pdf.read_bytes()[:5]
-    except Exception as e:
-        f.append(("read", "error", f"无法读取: {e}"))
-        return _result(pdf, f)
-    if head != b"%PDF-":
-        f.append(("magic", "error", "非法 PDF 头"))
+        size = pdf.stat().st_size
+        check("filesize", "passed" if size >= 1024 else "error", f"{size}B（至少 1024B）")
+        with pdf.open("rb") as stream:
+            magic = stream.read(5)
+        check("magic", "passed" if magic == b"%PDF-" else "error", "PDF 文件头检查")
+    except OSError as exc:
+        check("read", "error", f"无法读取: {exc}")
+        return _result(pdf, checks)
+
     try:
         from pypdf import PdfReader
-        r = PdfReader(str(pdf))
-        pages = r.pages
-        if len(pages) == 0:
-            f.append(("pages", "error", "0 页"))
-        # Mermaid 源码残留（NFKC 归一消除 CJK 兼容映射干扰，不影响 ASCII 特征）
-        leak = []
-        bombs = []
-        for i, p in enumerate(pages):
-            txt = unicodedata.normalize("NFKC", p.extract_text() or "")
-            if MERMAID_RE.search(txt):
-                leak.append(i + 1)
-            # M1.4 错误炸弹检测：图渲染失败时的错误 SVG 文本被印进成品
-            if ERROR_BOMB_RE.search(txt):
-                bombs.append(i + 1)
-        if leak:
-            f.append(("mermaid_leak", "error", f"Mermaid 源码残留于页 {leak}（图未渲染成 SVG）"))
-        if bombs:
-            f.append(("mermaid_bomb", "error",
-                      f"Mermaid 错误炸弹（Syntax error）印于页 {bombs}——图渲染失败被交付"))
-        # 首页文本
-        if pages and len((pages[0].extract_text() or "").strip()) == 0:
-            f.append(("first_page", "warn", "首页无可提取文本（疑似白屏/纯图）"))
-        # metadata
-        meta = r.metadata or {}
-        if src_md and _has_frontmatter(src_md) and not (meta.get("/Title") or meta.get("/Author")):
-            f.append(("pdf_metadata", "warn", "源有 frontmatter 但 PDF metadata 为空"))
-        # M1.4 图数对账：渲染端写入的「源图数/成功渲染数」metadata 必须相等
-        dt, dr = meta.get("/JZDiagramTotal"), meta.get("/JZDiagramRendered")
-        if dt not in (None, "") and dr not in (None, "") and str(dt) != str(dr):
-            f.append(("diagram_count", "error",
-                      f"Mermaid 图数对账不齐：源 {dt} 个、成功渲染 {dr} 个"))
     except ImportError:
-        f.append(("pypdf", "skipped", "pypdf 未安装，页级检查跳过"))
-    except Exception as e:
-        f.append(("parse", "error", f"PDF 解析失败: {e}"))
-    return _result(pdf, f)
+        for name in ("pages", "mermaid_leak", "mermaid_bomb", "diagram_count", "required_text"):
+            check(name, "skipped", "pypdf 未安装，无法完成页级检查", name != "required_text" or bool(required_text))
+        return _result(pdf, checks)
+
+    try:
+        reader = PdfReader(str(pdf))
+        pages = reader.pages
+        check("pages", "passed" if pages else "error", f"{len(pages)} 页")
+        texts = [unicodedata.normalize("NFKC", p.extract_text() or "") for p in pages]
+        for name, pattern in (("mermaid_leak", MERMAID_RE), ("mermaid_bomb", ERROR_BOMB_RE)):
+            hits = [i + 1 for i, text in enumerate(texts) if pattern.search(text)]
+            check(name, "error" if hits else "passed", f"命中页 {hits}" if hits else "未检出")
+        # No extractable text is a diagnostic, never proof of missing visual content.
+        if texts and not texts[0].strip():
+            check("first_page", "warn", "首页无可提取文本；纯图/矢量页可合法，须另看页面", False)
+        else:
+            check("first_page", "passed", "首页有可提取文本", False)
+        body = _normalized_text("\n".join(texts))
+        for sentinel in required_text:
+            found = _normalized_text(sentinel) in body
+            check("required_text", "passed" if found else "error", f"正文哨兵 {sentinel!r}")
+        meta = reader.metadata or {}
+        if src_md and _has_frontmatter(src_md):
+            present = bool(meta.get("/Title") or meta.get("/Author"))
+            check("pdf_metadata", "passed" if present else "warn", "源 frontmatter 的 PDF metadata 检查", False)
+        expected_diagrams = False
+        if src_md:
+            try:
+                source = Path(src_md).read_text(encoding="utf-8")
+                expected_diagrams = bool(re.search(r"^\s*(?:`{3,}|~{3,})mermaid\b", source, re.M))
+            except OSError as exc:
+                check("source", "skipped", f"无法读取源文件: {exc}")
+        total, rendered = meta.get("/JZDiagramTotal"), meta.get("/JZDiagramRendered")
+        if total in (None, "") or rendered in (None, ""):
+            check("diagram_count", "skipped", "PDF 缺图数 metadata" if expected_diagrams else "源文无 Mermaid 图，无需图数对账", expected_diagrams)
+        else:
+            check("diagram_count", "passed" if str(total) == str(rendered) else "error",
+                  f"源 {total} 个、成功渲染 {rendered} 个")
+    except Exception as exc:
+        check("parse", "error", f"PDF 解析失败: {exc}")
+    return _result(pdf, checks)
 
 
-def _result(pdf, findings):
-    summ = {lvl: sum(1 for x in findings if x[1] == lvl) for lvl in ("error", "warn", "skipped")}
-    return {"pdf": str(pdf), "findings": findings, "summary": summ}
+def _result(pdf, checks):
+    findings = [(c["name"], c["status"], c["reason"]) for c in checks if c["status"] != "passed"]
+    summary = {level: sum(c["status"] == level for c in checks) for level in ("error", "warn", "skipped")}
+    summary["required_skipped"] = sum(c["status"] == "skipped" and c["required"] for c in checks)
+    return {"pdf": str(pdf), "findings": findings, "summary": summary, "checks": checks}
 
 
-def render_report(res, as_json=False):
+def failed(result, strict=False, fail_on="error"):
+    summary = result["summary"]
+    return bool(summary["error"] or (strict and summary["required_skipped"])
+                or (fail_on == "warn" and summary["warn"]))
+
+
+def render_report(result, as_json=False):
     if as_json:
-        print(json.dumps({
-            "pdf": res["pdf"],
-            "findings": [{"name": n, "level": lv, "msg": m} for n, lv, m in res["findings"]],
-            "summary": res["summary"],
-        }, ensure_ascii=False))
+        print(json.dumps({**result, "findings": [
+            {"name": name, "level": level, "msg": msg} for name, level, msg in result["findings"]
+        ]}, ensure_ascii=False))
         return
-    marks = {"error": "❌", "warn": "⚠️ ", "skipped": "⏭ "}
-    name = Path(res["pdf"]).name
-    if not res["findings"]:
-        print(f"✅ {name} 质量门通过（无问题）")
-    for n, lv, m in res["findings"]:
-        print(f"  {marks.get(lv, '  ')} {n}: {m}")
-    s = res["summary"]
-    print(f"  === error={s['error']} warn={s['warn']} skipped={s['skipped']} ===")
+    for check in result["checks"]:
+        required = "required" if check["required"] else "optional"
+        print(f"  [{check['status']}] {check['name']} ({required}): {check['reason']}")
+    s = result["summary"]
+    print(f"  === error={s['error']} warn={s['warn']} skipped={s['skipped']} required_skipped={s['required_skipped']} ===")
 
 
 def main(argv):
-    if not argv:
-        print("Usage: python verify_pdf.py <pdf> [--src <md>] [--json] [--fail-on warn|error]")
-        return 1
-    pdf = argv[0]
-    src = None
-    as_json = False
-    fail_on = "error"
-    i = 1
-    while i < len(argv):
-        if argv[i] == "--src" and i + 1 < len(argv):
-            src = argv[i + 1]; i += 2
-        elif argv[i] == "--json":
-            as_json = True; i += 1
-        elif argv[i] == "--fail-on" and i + 1 < len(argv):
-            fail_on = argv[i + 1]; i += 2
-        else:
-            i += 1
-    res = verify(pdf, src)
-    render_report(res, as_json=as_json)
-    s = res["summary"]
-    if s["error"] > 0:
-        return 1
-    if fail_on == "warn" and s["warn"] > 0:
-        return 1
-    return 0
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("pdf")
+    parser.add_argument("--src")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--fail-on", choices=("warn", "error"), default="error")
+    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--require-text", action="append", default=[])
+    args = parser.parse_args(argv)
+    result = verify(args.pdf, args.src, args.require_text)
+    render_report(result, args.json)
+    return int(failed(result, args.strict, args.fail_on))
 
 
 if __name__ == "__main__":

@@ -8,12 +8,12 @@ which provides displayHeaderFooter with page numbers.
 import sys
 import re
 import subprocess
-import base64
 import json
-import mimetypes
 import markdown
 from pathlib import Path
 from themes import load_theme, list_themes
+from image_assets import embed_local_images, local_image_check_js
+from pdf_delivery import staged_pdf
 
 # All Obsidian callout types
 CALLOUT_STYLES = {
@@ -91,23 +91,6 @@ MERMAID_LOCAL = Path(__file__).parent / "mermaid.min.js"
 
 
 
-def embed_local_images(md_text, md_dir):
-    """Convert local image paths to base64 data URIs for reliable rendering."""
-
-    def _replace_img(m):
-        alt = m.group(1)
-        src = m.group(2)
-        # Skip URLs and data URIs
-        if src.startswith(("http://", "https://", "data:")):
-            return m.group(0)
-        img_path = (md_dir / src).resolve()
-        if not img_path.exists():
-            return m.group(0)
-        mime = mimetypes.guess_type(str(img_path))[0] or "image/png"
-        b64 = base64.b64encode(img_path.read_bytes()).decode()
-        return f"![{alt}](data:{mime};base64,{b64})"
-
-    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _replace_img, md_text)
 
 
 def get_mermaid_src():
@@ -328,44 +311,8 @@ def apply_directives(md_text, directives):
 
 
 def remove_blank_pages(pdf_path):
-    """Remove blank and near-empty pages from the PDF.
-
-    Removes pages that are completely empty or have < 50 chars of text
-    (trailing artifact pages). Returns the number of pages removed.
-    """
-    try:
-        from pypdf import PdfReader, PdfWriter
-    except ImportError:
-        return 0
-
-    reader = PdfReader(str(pdf_path))
-    total = len(reader.pages)
-    if total <= 1:
-        return 0
-
-    # Identify pages to drop
-    drop = []
-    for i, page in enumerate(reader.pages):
-        text = (page.extract_text() or "").strip()
-        is_last = i == total - 1
-        # Remove if: completely empty, OR last page with < 50 chars
-        if len(text) == 0 or (is_last and len(text) < 50):
-            drop.append(i)
-
-    if not drop:
-        return 0
-
-    # clone_from 保留原生 outline/StructTreeRoot（tagged PDF），逐页 remove_page；
-    # 空白页无标题，不会有书签目标悬空
-    writer = PdfWriter(clone_from=str(pdf_path))
-    for i in reversed(drop):
-        writer.remove_page(i)
-
-    tmp_path = pdf_path.with_suffix(".tmp.pdf")
-    with open(tmp_path, "wb") as f:
-        writer.write(f)
-    tmp_path.replace(pdf_path)
-    return len(drop)
+    """Keep all generated pages; lack of extracted text is not blank evidence."""
+    return 0
 
 
 def add_pdf_bookmarks(pdf_path, md_path):
@@ -880,7 +827,15 @@ def build_html(md_path, header_text, directives=None, theme="blue"):
 </html>"""
 
 
-def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="blue"):
+def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="blue",
+              verify=False, verify_strict=False, required_text=()):
+    target = Path(pdf_path) if pdf_path else Path(md_path).with_suffix(".pdf")
+    with staged_pdf(target, md_path, verify, verify_strict, required_text) as staged:
+        _generate_pdf(md_path, staged, header_text, directives, theme)
+    print(f"✅ {target.name} ({target.stat().st_size / 1024:.0f} KB)")
+
+
+def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="blue"):
     """Convert markdown to PDF via Playwright Chromium headless."""
     md_path = Path(md_path)
     pdf_path = Path(pdf_path) if pdf_path else md_path.with_suffix(".pdf")
@@ -912,6 +867,7 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="
         "  await page.goto('file://", html_path_js, "', { waitUntil: 'networkidle' });\n",
         "  // Wait for JS pagination engine to run\n",
         "  await page.waitForTimeout(", str(wait_ms), ");\n",
+        local_image_check_js(),
         "  await page.pdf({\n",
         "    path: '", pdf_path_js, "',\n",
         "    format: 'A4',\n",
@@ -946,16 +902,10 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="
     if not pdf_path.exists():
         raise RuntimeError("PDF not generated")
 
-    # Remove blank/near-empty pages
-    removed = remove_blank_pages(pdf_path)
-    if removed:
-        print(f"  🧹 Removed {removed} blank page(s)")
 
     # Add PDF bookmarks from heading hierarchy
     add_pdf_bookmarks(pdf_path, md_path)
 
-    size_kb = pdf_path.stat().st_size / 1024
-    print(f"\u2705 {pdf_path.name} ({size_kb:.0f} KB)")
 
 
 if __name__ == "__main__":
@@ -963,6 +913,9 @@ if __name__ == "__main__":
     directives = []
     positional = []
     theme = "blue"
+    verify = False
+    verify_strict = False
+    required_text = []
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -979,13 +932,23 @@ if __name__ == "__main__":
                 print(f"Unknown theme '{theme}'. Available: {', '.join(list_themes())}")
                 sys.exit(1)
             i += 2
+        elif arg == "--verify":
+            verify = True
+            i += 1
+        elif arg == "--verify-strict":
+            verify = verify_strict = True
+            i += 1
+        elif arg == "--require-text" and i + 1 < len(sys.argv):
+            required_text.append(sys.argv[i + 1])
+            verify = True
+            i += 2
         else:
             positional.append(sys.argv[i])
             i += 1
 
     if not positional:
         print(
-            "Usage: python md2pdf_browser.py <md_file> [pdf_file] [header_text] [--theme blue|dark|academic] [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]"
+            "Usage: python md2pdf_browser.py <md_file> [pdf_file] [header_text] [--verify | --verify-strict] [--require-text TEXT] [--theme blue|dark|academic] [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]"
         )
         sys.exit(1)
     md_to_pdf(
@@ -994,4 +957,7 @@ if __name__ == "__main__":
         positional[2] if len(positional) > 2 else None,
         directives or None,
         theme=theme,
+        verify=verify,
+        verify_strict=verify_strict,
+        required_text=required_text,
     )

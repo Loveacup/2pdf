@@ -63,7 +63,7 @@ Avoid relying on legacy automatic bootstrap for installation: when a direct rend
 python scripts/md2pdf_chrome.py <md_file> [pdf_file] [header_text] \
   [--format pdf|png|html|wechat] [--browser playwright|chrome|auto] \
   [--theme NAME] [--page-size A4|430x932] \
-  [--verify] [--properties] [--byline] [--preview DIR] \
+  [--verify | --verify-strict] [--require-text TEXT] [--properties] [--byline] [--preview DIR] \
   [--allow-diagram-errors] [--no-metadata] [--fallback pandoc] \
   [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]
 
@@ -81,6 +81,7 @@ python3 scripts/md2pdf_chrome.py --setup
 python scripts/md2pdf_chrome.py report.md
 python scripts/md2pdf_chrome.py report.md ~/output/report.pdf "My Report Title"
 python scripts/md2pdf_chrome.py note.md out.pdf --browser auto --verify
+python scripts/md2pdf_chrome.py note.md out.pdf --verify-strict --require-text "Signed: Alex"
 python scripts/md2pdf_chrome.py report.md output.pdf --theme academic --sm "开发路线图" --xs-after "变更历史"
 ```
 
@@ -93,7 +94,9 @@ python scripts/md2pdf_chrome.py report.md output.pdf --theme academic --sm "开�
 | `--page-size A4\|WxH` | `A4` (default) or a custom mobile size like `430x932`. Validated up front |
 | `--setup` | One-time idempotent bootstrap: persistent venv + deps + Playwright Chromium + pinned vendor assets (mermaid/hljs, `vendor.lock.json`) + smoke render acceptance. Alias: `--preflight --fix` |
 | `--preflight [--json]` | Health-check current interpreter, deps, browsers, pandoc, vendored assets, persistent venv — no rendering. Exit 0 ok / 1 fatal / 2 missing doc |
-| `--verify` | After rendering PDF, run delivery quality gate (`verify_pdf.py`): Mermaid-source leak, **Mermaid error-bomb text (fuzzy match)**, **diagram count reconciliation** (`/JZDiagramTotal` vs `/JZDiagramRendered` metadata), file size/magic, page count, metadata |
+| `--verify` | Verify the staged PDF in a separate process before delivery: file size/magic, page count, Mermaid-source leak/error text, diagram counts, metadata. Any error exits nonzero; warnings and skipped checks remain diagnostic |
+| `--verify-strict` | Implies `--verify`; also fails when a **required** check is skipped (e.g. missing `pypdf`, or missing diagram-count metadata for a Mermaid source). Optional/not-applicable checks may skip. A legitimate image-only page does not fail |
+| `--require-text TEXT` | Repeatable PDF body-text sentinel; implies `--verify`. Missing text fails delivery. Opt in to the expected source content; text is not inferred from image pixels |
 | `--allow-diagram-errors` | Explicitly allow a PDF to be produced even when some Mermaid diagrams failed (default: **fail-fast, exit 3, no output file**) |
 | `--no-bootstrap` | Disable the automatic venv self-healing re-exec |
 | `--fallback pandoc` | Force the pandoc lifeboat (pandoc → HTML+CSS → system Chrome print-to-pdf). Style NOT faithful, no Mermaid, A4 only. Also auto-triggered by `--browser auto` when no Chromium can launch |
@@ -115,7 +118,7 @@ python scripts/md2pdf_chrome.py report.md output.pdf --theme academic --sm "开�
 1. **Fence-first preprocessing** — code fences & inline code are extracted to placeholders BEFORE `==highlight==`/wikilink/tasklist conversions, so Mermaid thick arrows (`A ==> B`) and code containing `[[ ]]`/`- [ ]` are never mangled.
 2. **Render-time fail-fast** — every Mermaid block is `mermaid.parse()`-prechecked then rendered individually in the page; any failure aborts with exit 3, block number, error message and source head — **no PDF is produced**. Engine downgrade and the pandoc lifeboat are NOT triggered by diagram content errors.
 3. **Parse precheck reporting** — errors are reported in seconds (before full page render), so the agent can fix the md immediately.
-4. **Independent verify gate** — `--verify` re-checks the delivered PDF in a separate process: error-bomb fuzzy text scan + diagram count reconciliation via PDF metadata.
+4. **Independent verify gate** — `--verify` checks the staged PDF in a separate process before publishing. PDF output is staged beside its target and atomically replaced only after successful rendering and the requested gate; failures preserve an existing target byte-for-byte and never print a success marker. Status and skip reasons are printed. `--verify-strict` rejects skipped required checks.
 
 **Cross-platform (mac + Windows)**: CJK font stacks include PingFang/YaHei (+ Consolas/Cascadia for code); system-Chrome discovery covers `/Applications`, `%ProgramFiles%`, Linux paths; Playwright cache detection covers `Library/Caches`, `.cache`, `%LOCALAPPDATA%`; no `/tmp` hardcoding (uses the platform temp dir); vendored assets live next to `scripts/`. Deploy/sync shell scripts remain mac-side; on Windows just `git pull` + `--setup`.
 
@@ -172,11 +175,13 @@ Obsidian MD → preprocess → Python markdown (md_in_html) → section wrap →
 5. **Syntax Highlighting**: highlight.js CDN with theme-aware styling (atom-one-dark / atom-one-light)
 6. **Content Adaptation JS**: Adaptive table font sizing (5+ cols → 10px, 7+ → 9px), section density analysis (auto-shrink dense sections)
 7. **Render**: Playwright Chromium headless — `waitForFunction` waits for Mermaid SVG rendering, `networkidle` ensures all resources loaded, then `page.pdf()` with A4 format + page numbers + native bookmarks & accessibility tags (`outline: true, tagged: true`)
-8. **Post-process**: Remove blank pages + write metadata via pypdf `clone_from` (preserves native outline/tags); pypdf bookmark builder kept only as fallback for PDFs without a native outline (e.g. pandoc lifeboat)
+8. **Post-process and deliver**: Keep **all** generated pages, including bitmap/vector-only pages, short endings and intentional blanks. Write metadata via pypdf `clone_from` (preserves native outline/tags); use pypdf bookmarks only when no native outline exists. Verify the staged PDF when requested, then atomically publish it.
 
 For pagination rules, font sizing tables, Mermaid details, callout types, and CSS customization, see `references/md2pdf-details.md`.
 
 ### Pitfalls
+**Local image failures stop delivery.** Missing/unreadable Markdown-local images name their source reference; browser-native decode rejects corrupt or unsupported image content before printing. A failed conversion does not create a final PDF or modify an existing target. Remote URLs/data URIs retain their previous handling; this is not an offline policy or resource sandbox. The legacy `md2pdf_browser.py` shares these image, page-preservation and PDF staging safeguards and supports `--verify`, `--verify-strict`, and repeatable `--require-text`.
+
 
 **Mermaid failures never reach the PDF (by design).** If a render exits with code 3 and a `图#N` error listing, the md has a genuine Mermaid syntax error — fix the listed block and re-run. Historical note: thick arrows `==>` used to be destroyed by the highlight preprocessor (2026-07-02 incident); fence-first protection fixed this permanently, so `==>` is safe to use now.
 

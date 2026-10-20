@@ -1,6 +1,6 @@
 # 2pdf 排版优化路线图
 
-> 本文是基于当前 2pdf 源码、现有文档和固定上游提交的**研究与提案**，不是已实现能力或性能承诺。优先做可度量的渐进修正；在兼容性证据充分前，不替换 Chromium 主链。PDF 合并、拆分、旋转、水印、加密、表单读取/填写及基础提取属于独立能力链，本路线图不迁移、不裁剪它们。
+> 本文基于 2pdf 基线源码、文档和固定上游提交制定分阶段合同。**P0-A 已按下方证据实施；P0-B/P1/P2 尚未实施**，不作性能承诺。在兼容性证据充分前，不替换 Chromium 主链。PDF 合并、拆分、旋转、水印、加密、表单读取/填写及基础提取属于独立能力链，本路线图不迁移、不裁剪它们。
 
 ## 结论摘要
 
@@ -9,7 +9,7 @@
 3. **P1：逐项改善分页、表格、字体、公式和图表。** 先固定可复现测试环境，再用实际页面和内容核对验收，不以旧页数或文本抽取单独判定质量。
 4. **P2：在 Chromium 主链上的改进无法达到目标时，才做单独的分页引擎 spike。** Paged.js 是较低授权摩擦的候选；Vivliostyle 是 AGPL-3.0，需先审查分发/集成义务；WeasyPrint 不作为 macOS CJK 默认替代；Typst 是新的排版/内容管线，不是即插即用 Markdown renderer。
 
-## 现状与源码接缝（事实）
+## 基线现状与源码接缝（实施前事实）
 
 - **HTML/Markdown 构造：** [`build_html()`、`wrap_sections()` 和 `preprocess_markdown()`](../scripts/md2pdf_chrome.py#L267-L352) 将 Markdown 扩展转换结果按 h2/h3 包装，并依赖字符串级 DOM 后处理。`build_html()` 使用 Python `markdown` 的 tables、fenced_code、toc、sane_lists、md_in_html、footnotes 扩展，再用正则将 Mermaid fenced block 改为容器（[`md2pdf_chrome.py#L513-L574`](../scripts/md2pdf_chrome.py#L513-L574)）。这使分页行为依赖当前 HTML 结构与这些正则/包装边界。
 - **分页：** 文档记录 CSS baseline（标题、列表、段落 widow/orphan、Mermaid avoid break）后由 JS 收集 `offsetTop`/高度，模拟 970px 页面边界，并按元素高度、溢出比例和留白阈值修改 break 样式，另作 heading 与首内容配对（[`md2pdf-details.md#L5-L38`](md2pdf-details.md#L5-L38)）。当前 PDF 主路径由 [`_render_playwright()` / `md_to_pdf()`](../scripts/md2pdf_chrome.py#L1317-L1439) 使用 Chromium `page.pdf()`；auto 只在浏览器启动/渲染失败时降级，Pandoc 救生艇会丢掉 Mermaid、自适应字号与部分样式（[`md2pdf_chrome.py#L1698-L1742`](../scripts/md2pdf_chrome.py#L1698-L1742)）。
@@ -32,9 +32,9 @@
 
 ## 审核结论与实施边界
 
-本方案按 **P0-A → P0-B → P1 → P2** 分阶段交付。先防止内容损失，再处理隔离与资源边界，最后改善版式。下列接口和行为是待实现合同，不代表当前 CLI 已支持。
+本方案按 **P0-A → P0-B → P1 → P2** 分阶段交付。先防止内容损失，再处理隔离与资源边界，最后改善版式。P0-A 的已实现接口及证据见文末；其余接口和行为仍是待实现合同。
 
-2026-09-29 审核实测：临时构造两页 PDF，第一页为可见蓝色矢量图形，第二页为 `Signed: Alex`。直接调用当前 `remove_blank_pages()`，结果为 `before 2 / removed 2 / after 0`。这是函数级复现，不扩大为所有正常转换均会失败；输入均为合成素材。当前规则会删除任意无可抽取文本页，以及少于 50 字的尾页，必须优先处理。
+2026-09-29 审核实测：临时构造两页 PDF，第一页为可见蓝色矢量图形，第二页为 `Signed: Alex`。直接调用当时的 `remove_blank_pages()`，结果为 `before 2 / removed 2 / after 0`。这是函数级复现，不扩大为所有正常转换均会失败；输入均为合成素材。旧规则会删除任意无可抽取文本页，以及少于 50 字的尾页；P0-A 已停止此行为。
 
 ### P0-A — 内容不丢失
 
@@ -97,4 +97,41 @@
 
 - 上游源码与许可证链接保留固定 SHA；本方案不引用未经测量的性能结论。
 - 本地源码引用行号仅用于导航，以函数实际行为为准。
-- 本次交付为审核后的方案修订，未实现 P0/P1/P2，也未修改 PDF 编辑、表单或渲染代码。上述两页删除是已观察到的函数级缺陷；其余验收条目是实施要求，不是通过记录。
+- **P0-A（2026-10-20）已交付，P0-B/P1/P2 未开始**。PDF 编辑、表单链及分页策略未改；未升级依赖或替换解析器。`remove_blank_pages()` 保留全部原始字节；主/legacy 路径共享本地图片诊断、浏览器 decode 和 PDF 暂存原子交付。新增 `--verify-strict` 与可重复 `--require-text TEXT`；独立 verifier 的 `--strict`、`--require-text` 与 JSON `checks` 显示必需性、状态及原因。
+
+### P0-A 验收记录
+
+全部使用临时目录中的合成输入，不修改用户文件。前后真实渲染使用系统 Google Chrome 155.0.8059.85；函数级固定 PDF 含书签与 metadata。旧 renderer 从本阶段修改前的 HEAD 导出到临时目录，与新 renderer 顺序执行相同源样本。
+
+| 样本/检查 | 实施前 | P0-A 后 |
+|---|---|---|
+| 位图、矢量、短签名、少字尾页、真正空白五页 | 5→2，图页和空白页删除 | 主/legacy 均 5→5，文件字节、页序、outline、metadata 不变 |
+| 矢量图+`Signed: Alex` 两页复现 | 2→0 | 主/legacy 均 2→2，文件字节不变 |
+| 真实 Markdown 图片页+强制分页短签名 | 退出 0、仅 1 页，签名被删；页脚仍写 1/2 | 退出 0、保留 2 页；图片可见，签名文本存在且可见 |
+| 真实缺图/损坏图 | 退出 0 并覆盖旧目标，页面呈 broken-image/alt 文本 | 退出 1 并指出源引用；已有目标字节不变；另测新目标不存在 |
+| 真实不可读图（临时文件权限设 000） | 旧实现未单独测此项 | 退出 1、源引用明确、已有目标字节不变；单元测试另有确定性 PermissionError 注入 |
+| 缺正文哨兵、非法 PDF、缺必需 pypdf | 旧 verifier 无显式哨兵/strict；缺依赖仅 skipped | 三者严格模式均退出 1；缺依赖与缺哨兵另跑真实转换，保留已有 PDF 的原字节 |
+| 合法纯位图无文本 PDF | 旧删页函数可误删 | strict 退出 0；无文本仅 warn；不适用的图数对账可 skipped |
+| CJK/原生 outline/tagged/metadata | 基线要求保留 | Chrome 真实转换通过；outline、StructTreeRoot、Title/Author 并存；页面查看无乱码、无意外多余空白页 |
+
+验证命令（`PY=~/.venvs/pdf-skill/bin/python`；`TMP` 为独立验收临时目录）：
+
+```bash
+$PY -m pytest -c tests/pytest.ini tests -q
+# 首次 119 passed / 5 failed；5 项因 bundled chromium_headless_shell-1208 缺失，交主任务待安装后补验。
+$PY -m pytest -c tests/pytest.ini tests -m 'not integration' -q
+# 117 passed, 9 deselected
+$PY -m pytest -c tests/pytest.ini tests/test_content_preservation.py -m integration -q
+# 4 passed, 25 deselected；新用例用 --browser auto，实际可用路径为系统 Chrome。
+$PY scripts/md2pdf_chrome.py \"$TMP/samples/image.md\" \"$TMP/after-image.pdf\" --browser chrome --theme blue --verify-strict --require-text \"Signed: Alex\"
+# exit 0；同命令替换为 missing.md/corrupt.md 均 exit 1，已有目标不变。
+$PY scripts/verify_pdf.py \"$TMP/after-image.pdf\" --strict --require-text \"absent body sentinel\" --json
+$PY scripts/verify_pdf.py \"$TMP/invalid.pdf\" --strict --json
+$PY -S scripts/verify_pdf.py \"$TMP/after-image.pdf\" --strict --json
+# 以上三条均 exit 1；-S 仅在验收子进程隐藏 site-packages，不卸载实际依赖。
+pdftoppm -scale-to 650 -png \"$TMP/fixed-md2pdf_chrome.pdf\" \"$TMP/fixed-md2pdf_chrome\"
+pdftoppm -scale-to 650 -png \"$TMP/after-image.pdf\" \"$TMP/after-image\"
+# 五类固定页及真实图片页/签名页逐页转 PNG，并查看接触表；另查看 CJK 原生书签样本首页。
+```
+
+P0-A 真实渲染与内容/视觉验收通过；完整 bundled-only 回归仍有上述安装前置条件。未声称完成 P0-B 的全格式临时隔离、同目标互斥、资源根或离线策略。

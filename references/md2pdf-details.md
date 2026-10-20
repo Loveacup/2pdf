@@ -72,7 +72,7 @@ Fenced code blocks are syntax-highlighted via **highlight.js** (CDN):
 Chromium generates the outline natively at render time (`page.pdf({ outline: true, tagged: true })`, Playwright ≥1.42):
 - Bookmark tree derives from the HTML heading structure — hierarchy and target pages are exact (no text-search page mapping)
 - `tagged: true` additionally emits PDF/UA accessibility structure tags (~2% size cost)
-- Post-processing (blank-page removal, metadata) uses pypdf `PdfWriter(clone_from=...)` so the native outline and StructTreeRoot survive — a plain reader+append rewrite would strip them
+- All generated pages are retained, including pure image/vector pages, short signatures/tails and intentional blanks. `remove_blank_pages()` returns zero without rewriting the file; text length is never evidence for deletion. Metadata uses pypdf `PdfWriter(clone_from=...)` so native outline and StructTreeRoot survive.
 - The legacy pypdf bookmark builder (`add_pdf_bookmarks`) auto-skips when a native outline exists; it remains as fallback for PDFs without one (e.g. the pandoc lifeboat, which loses bookmarks otherwise)
 
 ## Local Image Embedding
@@ -80,8 +80,20 @@ Chromium generates the outline natively at render time (`page.pdf({ outline: tru
 Local images in Markdown (`![alt](./img.png)`) are converted to base64 data URIs before rendering:
 - Ensures images display correctly regardless of working directory
 - Skips remote URLs (`http://`, `https://`) and existing data URIs
-- Gracefully handles missing files (preserves original path)
+- Missing/unreadable local files fail with the source reference. Embedded local images must decode successfully in Chromium before any artifact is printed; corrupt/unsupported image data fails nonzero rather than producing a broken-image PDF. This check also applies to the pandoc lifeboat (and requires a launchable Playwright/Chrome validator when local images are present).
 - MIME types detected automatically via `mimetypes.guess_type()`
+- URLs and data URIs retain the previous handling. P0-A does not restrict local resource roots or establish an offline policy.
+
+## PDF Delivery and Strict Acceptance
+
+Both `md2pdf_chrome.py` and legacy `md2pdf_browser.py` render a PDF into a temporary staging directory beside the target. Renderer success requires a successful process exit and a complete PDF, not the presence of an old target. Bookmarks/metadata and requested verification apply to the staged artifact. Only a successful artifact is atomically moved to the target; failure cleans the stage and leaves existing output bytes unchanged.
+
+- `--verify`: runs `verify_pdf.py` in a separate process, rejecting error-level findings. Warnings and skipped checks remain visible, preserving the existing error-only policy.
+- `--verify-strict`: implies `--verify` and also rejects skipped **required** checks. Page parsing/content checks require `pypdf`; Mermaid input requires diagram-count metadata. Optional/not-applicable checks (such as diagram counts for a source without Mermaid) can skip.
+- `--require-text TEXT`: repeatable body-text sentinels; implies `--verify`. A missing sentinel is an error. Supply the exact expected body text; comparisons normalize Unicode and whitespace, not image pixels.
+- `verify_pdf.py file.pdf --src source.md --strict --require-text "Signed: Alex" --json` exposes `checks` with `status`, `required`, and `reason`, in addition to the existing findings/summary. CLI exit is nonzero for errors or skipped required checks in strict mode.
+- A legitimate image-only page may report a text-extraction warning but passes strict acceptance. Text extraction does not replace viewing the actual pages.
+
 
 ## Custom Themes
 

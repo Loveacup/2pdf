@@ -10,7 +10,6 @@ import tempfile
 import base64
 import json
 import importlib.util
-import mimetypes
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -23,6 +22,8 @@ except ImportError:  # 允许在缺依赖的解释器上仍能跑 --preflight �
 
 from themes import load_theme, list_themes
 from themes.theme_router import route as route_theme, is_palette, list_palettes
+from image_assets import embed_local_images, local_image_check_js, LocalImageError
+from pdf_delivery import staged_pdf, DeliveryError
 
 # 支持的输出格式
 VALID_FORMATS = ("pdf", "png", "html", "wechat")
@@ -176,23 +177,6 @@ def _frontmatter_display_html(frontmatter, properties=False, byline=False):
             html += f'<div class="doc-properties">{cells}</div>'
     return html
 
-def embed_local_images(md_text, md_dir):
-    """Convert local image paths to base64 data URIs for reliable Chrome rendering."""
-
-    def _replace_img(m):
-        alt = m.group(1)
-        src = m.group(2)
-        # Skip URLs and data URIs
-        if src.startswith(("http://", "https://", "data:")):
-            return m.group(0)
-        img_path = (md_dir / src).resolve()
-        if not img_path.exists():
-            return m.group(0)
-        mime = mimetypes.guess_type(str(img_path))[0] or "image/png"
-        b64 = base64.b64encode(img_path.read_bytes()).decode()
-        return f"![{alt}](data:{mime};base64,{b64})"
-
-    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _replace_img, md_text)
 
 
 # M1.1 fence-first：文本级转换（==高亮==/wikilink/任务清单/图片内嵌）会污染代码
@@ -1346,6 +1330,7 @@ const {{ chromium }} = require('playwright');
   const browser = await {launch_expr};
   const page = await browser.newPage();
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
+{local_image_check_js()}
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
   await page.pdf({{
     path: {json.dumps(str(pdf_path.resolve()))},
@@ -1371,7 +1356,9 @@ const {{ chromium }} = require('playwright');
         # M1.2 exit 3 = Mermaid 内容错误：立即终止，不降级引擎、不转 pandoc
         if result.returncode == 3:
             raise MermaidRenderError(_format_mermaid_errors(result.stderr))
-        if pdf_path.exists() and pdf_path.stat().st_size >= 1024:
+        if result.returncode == 4:
+            raise LocalImageError(result.stderr.strip())
+        if result.returncode == 0 and pdf_path.exists() and pdf_path.stat().st_size >= 1024:
             scale_match = re.search(r"MERMAID_SCALE_WARNINGS:(\[[^\n]*\])", result.stdout)
             if scale_match:
                 for item in json.loads(scale_match.group(1)):
@@ -1390,7 +1377,19 @@ const {{ chromium }} = require('playwright');
 def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
               theme="blue", page_size="A4", browser="playwright",
               fallback=None, write_metadata=True, allow_diagram_errors=False,
-              properties=False, byline=False):
+              properties=False, byline=False, verify=False, verify_strict=False,
+              required_text=()):
+    target = Path(pdf_path) if pdf_path else Path(md_path).with_suffix(".pdf")
+    with staged_pdf(target, md_path, verify, verify_strict, required_text) as staged:
+        _generate_pdf(md_path, staged, header_text, directives, theme, page_size, browser,
+                      fallback, write_metadata, allow_diagram_errors, properties, byline)
+    print(f"✅ {target.name} ({target.stat().st_size / 1024:.0f} KB)")
+
+
+def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None,
+                  theme="blue", page_size="A4", browser="playwright",
+                  fallback=None, write_metadata=True, allow_diagram_errors=False,
+                  properties=False, byline=False):
     md_path = Path(md_path)
     pdf_path = Path(pdf_path) if pdf_path else md_path.with_suffix(".pdf")
     header_text = header_text or md_path.stem
@@ -1407,6 +1406,7 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
 
     diagram_stat = None
     if fallback == "pandoc":
+        _validate_fallback_images(html_path)
         _render_pandoc_fallback(md_path, pdf_path, theme=theme, page_size=page_size)
     else:
         try:
@@ -1415,12 +1415,9 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
                 allow_diagram_errors=allow_diagram_errors)
         except _NeedPandoc as e:
             print(f"  ⚠️  {e} → 转 pandoc 救生艇", file=sys.stderr)
+            _validate_fallback_images(html_path)
             _render_pandoc_fallback(md_path, pdf_path, theme=theme, page_size=page_size)
 
-    # Remove blank/near-empty pages
-    removed = remove_blank_pages(pdf_path)
-    if removed:
-        print(f"  🧹 Removed {removed} blank page(s)")
 
     # Add PDF bookmarks from heading hierarchy
     add_pdf_bookmarks(pdf_path, md_path)
@@ -1436,49 +1433,15 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
             }
         add_pdf_metadata(pdf_path, md_path, extra=extra)
 
-    size_kb = pdf_path.stat().st_size / 1024
-    print(f"\u2705 {pdf_path.name} ({size_kb:.0f} KB)")
 
 
 def remove_blank_pages(pdf_path):
-    """Remove blank and near-empty pages from the PDF.
+    """Preserve every generated page, including image-only and truly blank pages.
 
-    Removes pages that are completely empty or have < 50 chars of text
-    (trailing artifact pages). Returns the number of pages removed.
+    Text extraction is not evidence of visual emptiness. Keeping the original
+    bytes also preserves page order, native outline, metadata and tagged structure.
     """
-    try:
-        from pypdf import PdfReader, PdfWriter
-    except ImportError:
-        return 0
-
-    reader = PdfReader(str(pdf_path))
-    total = len(reader.pages)
-    if total <= 1:
-        return 0
-
-    # Identify pages to drop
-    drop = []
-    for i, page in enumerate(reader.pages):
-        text = (page.extract_text() or "").strip()
-        is_last = i == total - 1
-        # Remove if: completely empty, OR last page with < 50 chars
-        if len(text) == 0 or (is_last and len(text) < 50):
-            drop.append(i)
-
-    if not drop:
-        return 0
-
-    # clone_from 保留原生 outline/StructTreeRoot（tagged PDF），逐页 remove_page；
-    # 空白页无标题，不会有书签目标悬空
-    writer = PdfWriter(clone_from=str(pdf_path))
-    for i in reversed(drop):
-        writer.remove_page(i)
-
-    tmp_path = pdf_path.with_suffix(".tmp.pdf")
-    with open(tmp_path, "wb") as f:
-        writer.write(f)
-    tmp_path.replace(pdf_path)
-    return len(drop)
+    return 0
 
 
 def add_pdf_bookmarks(pdf_path, md_path):
@@ -1696,6 +1659,33 @@ def export_preview_pages(pdf_path, md_path, output_dir):
     return outputs
 
 # ===== pandoc 救生艇（第三路 fallback） =====
+
+
+def _validate_fallback_images(html_path):
+    """The lifeboat must not bypass browser-native local image decoding."""
+    if 'data-jz-local-source=' not in html_path.read_text(encoding="utf-8"):
+        return
+    plan = _launch_plan("auto")
+    last_error = ""
+    for launch, _engine, _exe in plan:
+        script = f"""
+const {{ chromium }} = require('playwright');
+(async () => {{
+  const browser = await {launch};
+  const page = await browser.newPage();
+  await page.goto({json.dumps(html_path.resolve().as_uri())}, {{waitUntil: 'networkidle'}});
+{local_image_check_js()}
+  await browser.close();
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], env=_node_env(),
+                                capture_output=True, text=True, timeout=120)
+        if result.returncode == 4:
+            raise LocalImageError(result.stderr.strip())
+        if result.returncode == 0:
+            return
+        last_error = result.stderr
+    raise LocalImageError(f"Cannot validate local images before pandoc fallback: {last_error}")
 
 
 def _render_pandoc_fallback(md_path, pdf_path, theme="auto", page_size="A4"):
@@ -2059,7 +2049,7 @@ CLI_USAGE = (
     "Usage: python md2pdf_chrome.py <md_file> [out_file] [header_text] "
     "[--format pdf|png|html|wechat] [--browser playwright|chrome|auto] "
     "[--fallback pandoc] [--setup] [--preflight [--json] [--fix]] "
-    "[--verify] [--allow-diagram-errors] [--no-bootstrap] [--no-metadata] "
+    "[--verify | --verify-strict] [--require-text TEXT] [--allow-diagram-errors] [--no-bootstrap] [--no-metadata] "
     "[--properties] [--byline] [--preview DIR] "
     "[--theme NAME] [--page-size A4|430x932] [--sm PATTERN] [--xs PATTERN] "
     "[--sm-after PATTERN] [--xs-after PATTERN]"
@@ -2087,6 +2077,8 @@ def parse_cli_args(argv):
     write_metadata = True
     as_json = False
     verify = False
+    verify_strict = False
+    required_text = []
     allow_diagram_errors = False
     setup = False
     no_bootstrap = False
@@ -2155,6 +2147,13 @@ def parse_cli_args(argv):
         elif arg == "--verify":
             verify = True
             i += 1
+        elif arg == "--verify-strict":
+            verify = verify_strict = True
+            i += 1
+        elif arg == "--require-text" and i + 1 < len(argv):
+            required_text.append(argv[i + 1])
+            verify = True
+            i += 2
         elif arg == "--allow-diagram-errors":
             allow_diagram_errors = True
             i += 1
@@ -2180,6 +2179,8 @@ def parse_cli_args(argv):
         "write_metadata": write_metadata,
         "as_json": as_json,
         "verify": verify,
+        "verify_strict": verify_strict,
+        "required_text": required_text,
         "allow_diagram_errors": allow_diagram_errors,
         "setup": setup,
         "no_bootstrap": no_bootstrap,
@@ -2264,6 +2265,7 @@ const {{ chromium }} = require('playwright');
   const browser = await {launch_expr};
   const page = await browser.newPage();
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
+{local_image_check_js()}
 {common_wait}
 {action}
   await browser.close();
@@ -2279,6 +2281,8 @@ const {{ chromium }} = require('playwright');
         # M1.2 exit 3 = Mermaid 内容错误：立即终止，不降级引擎
         if result.returncode == 3:
             raise MermaidRenderError(_format_mermaid_errors(result.stderr))
+        if result.returncode == 4:
+            raise LocalImageError(result.stderr.strip())
 
         if fmt in ("html", "wechat"):
             out = result.stdout
@@ -2289,7 +2293,7 @@ const {{ chromium }} = require('playwright');
                     content = inline_css(content)
                 out_path.write_text(content, encoding="utf-8")
 
-        if out_path.exists() and out_path.stat().st_size > 0:
+        if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
             return
         last_err = result.stderr
         if idx < len(plan) - 1:
@@ -2299,7 +2303,8 @@ const {{ chromium }} = require('playwright');
 def md_to_output(md_path, out_path=None, fmt="pdf", header_text=None,
                  directives=None, theme="blue", page_size="A4",
                  browser="playwright", fallback=None, write_metadata=True,
-                 allow_diagram_errors=False, properties=False, byline=False):
+                 allow_diagram_errors=False, properties=False, byline=False,
+                 verify=False, verify_strict=False, required_text=()):
     """按格式分发。pdf 走原有 md_to_pdf 路径，其余渲染 png/html/wechat。"""
     md_path = Path(md_path)
     if fmt == "pdf":
@@ -2307,7 +2312,8 @@ def md_to_output(md_path, out_path=None, fmt="pdf", header_text=None,
                   theme=theme, page_size=page_size, browser=browser,
                   fallback=fallback, write_metadata=write_metadata,
                   allow_diagram_errors=allow_diagram_errors,
-                  properties=properties, byline=byline)
+                  properties=properties, byline=byline, verify=verify,
+                  verify_strict=verify_strict, required_text=required_text)
         return
 
     header_text = header_text or md_path.stem
@@ -2383,10 +2389,16 @@ if __name__ == "__main__":
             allow_diagram_errors=args["allow_diagram_errors"],
             properties=args["properties"],
             byline=args["byline"],
+            verify=args["verify"],
+            verify_strict=args["verify_strict"],
+            required_text=args["required_text"],
         )
     except MermaidRenderError as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(3)
+    except (LocalImageError, DeliveryError, RuntimeError, OSError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
     if args["preview"]:
         out_resolved = output_path_for(
             positional[0], args["format"],
@@ -2394,13 +2406,3 @@ if __name__ == "__main__":
         )
         export_preview_pages(out_resolved, positional[0], args["preview"])
 
-    if args["verify"] and args["format"] == "pdf":
-        try:
-            from verify_pdf import verify as _verify_pdf, render_report as _render_vr
-            out_resolved = output_path_for(
-                positional[0], args["format"],
-                positional[1] if len(positional) > 1 else None,
-            )
-            _render_vr(_verify_pdf(out_resolved, positional[0]))
-        except Exception as e:
-            print(f"  ⚠️  verify 跳过: {e}", file=sys.stderr)
