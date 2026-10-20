@@ -183,7 +183,7 @@ Obsidian MD → preprocess → Python markdown (md_in_html) → section wrap →
 3. **Section Wrap**: Post-process HTML — wrap `<h2>` into `<section class="doc-section">`, wrap `<h3>` into `<div class="doc-subsection">`
 4. **Mermaid**: Convert mermaid code blocks → `<div class="mermaid">`, load pinned Mermaid JS vendored next to the script (`scripts/mermaid.min.js` + `vendor.lock.json`, downloaded by `--setup`), auto-scale SVG
 5. **Syntax Highlighting**: pinned local highlight.js and theme-aware CSS (atom-one-dark / atom-one-light), embedded into the invocation HTML; no CDN fallback
-6. **Content Adaptation JS**: Adaptive table font sizing (5+ cols → 10px, 7+ → 9px), section density analysis (auto-shrink dense sections)
+6. **Content Adaptation JS**: A4 tables keep readable font sizes, wrap cells/code and repeat headers; oversized rows may split. Unreadable/overflowing PDF tables fail with table/cell diagnostics instead of column-count shrinking. Section density classes and mobile-only cards remain.
 7. **Render**: Playwright Chromium headless — `waitForFunction` waits for Mermaid SVG rendering, `networkidle` ensures all resources loaded, then `page.pdf()` with A4 format + page numbers + native bookmarks & accessibility tags (`outline: true, tagged: true`)
 8. **Post-process and deliver**: Keep **all** generated pages, including bitmap/vector-only pages, short endings and intentional blanks. Write metadata via pypdf `clone_from` (preserves native outline/tags); use pypdf bookmarks only when no native outline exists. Verify the staged PDF when requested, then atomically publish it.
 

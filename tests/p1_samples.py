@@ -20,7 +20,7 @@ def samples(directory):
             tables += '|' + '|'.join(f'CELL_{cols}_{row}_{i} 中文长内容测试 `code_{i}`' for i in range(cols)) + '|\n'
         tables += '\n'
     tables += '<table><thead><tr><th colspan="2">SPAN_HEADER</th></tr></thead><tbody><tr><td rowspan="2">ROWSPAN_CELL</td><td>SPAN_A</td></tr><tr><td>SPAN_B</td></tr></tbody></table>\n\n'
-    tables += page + '\n\n| REPEATED_HEAD | DATA_HEAD |\n|---|---|\n' + ''.join(f'| ROW_{i:03d} | DATA_{i:03d} 长表数据 |\n' for i in range(90))
+    tables += page + '\n\n| REPEATED_HEAD | DATA_HEAD |\n|---|---|\n' + ''.join(f'| ROW_{i:03d} | DATA_{i:03d} 长表数据 |\n' for i in range(84))
     tables += '\n<table><thead><tr><th>LONG_ROW_HEAD</th></tr></thead><tbody><tr><td>' + '<br>'.join(f'LONG_CELL_{i:03d}' for i in range(100)) + '</td></tr></tbody></table>\n'
     fonts = '# Font corpus\n\n中文简体，繁體中文。「全角標點」（！？）：；\n\n日本語：ひらがな カタカナ 漢字。\n\n한국어: 한글 글꼴 확인.\n\nEmoji: 😀 🚀 ✅ ❤️ 👩‍💻\n\nSuperscript x² and subscript H₂O; HTML x<sup>2</sup> H<sub>2</sub>O.\n\nFONT_END\n'
     readiness = '# Readiness corpus\n\n![Image](image.svg)\n\n```mermaid\nflowchart LR\n A[开始] --> B[DIAGRAM_ONE]\n```\n\n' + page + '\n\n```mermaid\nsequenceDiagram\n participant A as DIAGRAM_TWO\n participant B as 完成\n A->>B: ready\n```\n\nREADY_END\n'

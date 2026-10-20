@@ -113,6 +113,16 @@ A4、vendor hashes、Playwright 1.58.2 与 Chromium revision 1208；
 普通无公式兼容样本前后均 1 页。`pytest -c tests/pytest.ini tests -q`：165 passed；
 分页集成测试连续两次真实渲染的页数与逐页文本结构完全一致。
 
+### P1 表格验收
+
+同一证据目录的 `samples-final/` 固定 84 行三页长表，`baseline-tables/` 与
+`tables/` 保存前后全部页面。3/6/8 列、长 CJK/代码、rowspan/colspan 完整；
+旧路径续页缺表头，新路径三页每页一次 REPEATED_HEAD，数据行/单元格各一次。
+100 行超长单元格跨页完整。40 列不可读样本非零退出并定位表/单元格；
+未采用截图、删列或 A4 卡片。普通兼容样本仍 1 页。表格项已实施，其他项继续。
+
+完整套件 `pytest -c tests/pytest.ini tests -q`：167 passed。
+
 
 ### P0-A 验收记录
 

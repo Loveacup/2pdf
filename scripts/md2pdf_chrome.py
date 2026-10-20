@@ -830,6 +830,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
     margin: 10px 0;
     font-size: 11.5px;
     line-height: 1.6;
+    table-layout: fixed;
     page-break-inside: auto;
   }}
   th {{
@@ -845,8 +846,8 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
     padding: 6px 10px;
     border: 1px solid var(--pdf-table-border);
     vertical-align: top;
-    word-break: break-all;
-    overflow-wrap: break-word;
+    word-break: normal;
+    overflow-wrap: anywhere;
   }}
   td code, th code {{
     white-space: normal !important;
@@ -855,6 +856,10 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
   }}
   tr:nth-child(even) td {{ background: var(--pdf-table-stripe); }}
   tr {{ page-break-inside: avoid; }}
+  thead {{ display: table-header-group; break-inside: avoid; }}
+  tfoot {{ display: table-footer-group; }}
+  thead tr {{ break-inside: avoid; }}
+  th, td {{ overflow-wrap: anywhere; word-break: normal; }}
 
   /* ===== Lists ===== */
   ul, ol {{ margin: 8px 0; padding-left: 22px; }}
@@ -1035,19 +1040,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
 <script>
   // Content-adaptive sizing: tables + section density analysis
   document.addEventListener('DOMContentLoaded', function() {{
-    // 1. Adaptive table font sizing
-    document.querySelectorAll('table').forEach(function(table) {{
-      var row = table.querySelector('tr');
-      if (!row) return;
-      var cols = row.querySelectorAll('th, td').length;
-      if (cols >= 7) {{
-        table.style.fontSize = '9px';
-        table.style.lineHeight = '1.4';
-      }} else if (cols >= 5) {{
-        table.style.fontSize = '10px';
-        table.style.lineHeight = '1.5';
-      }}
-    }});
+    // A4 tables retain readable type; no column-count compression.
 
     // 2. Mobile: transpose wide tables (>5 cols) into field/value cards
     if (document.body.classList.contains('mobile-layout')) {{
@@ -1345,6 +1338,8 @@ const {{ chromium }} = require('playwright');
             raise LocalImageError(result.stderr.strip())
         if result.returncode == 5:
             raise ResourceError(result.stderr.strip())
+        if result.returncode == 6:
+            raise RuntimeError(result.stderr.strip())
         if result.returncode == 0 and pdf_path.exists() and pdf_path.stat().st_size >= 1024:
             scale_match = re.search(r"MERMAID_SCALE_WARNINGS:(\[[^\n]*\])", result.stdout)
             if scale_match:
@@ -2250,6 +2245,8 @@ const {{ chromium }} = require('playwright');
             raise LocalImageError(result.stderr.strip())
         if result.returncode == 5:
             raise ResourceError(result.stderr.strip())
+        if result.returncode == 6:
+            raise RuntimeError(result.stderr.strip())
 
         if fmt in ("html", "wechat"):
             out = result.stdout

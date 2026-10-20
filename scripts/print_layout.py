@@ -13,7 +13,7 @@ def page_geometry(page_size):
 def prepare_print_js(page_size):
     width, height = page_geometry(page_size)
     return """
-  await page.evaluate(({width, height}) => {
+  const layoutErrors = await page.evaluate(({width, height}) => {
     document.querySelectorAll('pre, .callout, blockquote, table, ul, ol').forEach(el => {
       const rect = el.getBoundingClientRect();
       const style = getComputedStyle(el);
@@ -26,7 +26,31 @@ def prepare_print_js(page_size):
       el.style.maxHeight = Math.floor(height - 32) + 'px';
       el.style.objectFit = 'contain';
     });
+    const errors = [];
+    document.querySelectorAll('table').forEach((table, index) => {
+      table.querySelectorAll('tr').forEach(row => {
+        row.style.breakInside = row.getBoundingClientRect().height < height * 0.8 ? 'avoid' : 'auto';
+      });
+      const bad = Array.from(table.querySelectorAll('th, td')).find(cell => {
+        const style = getComputedStyle(cell);
+        const fontSize = parseFloat(style.fontSize);
+        const innerWidth = cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        return fontSize < 10 || (cell.textContent.trim() && innerWidth < fontSize * 2)
+          || cell.scrollWidth > cell.clientWidth + 2;
+      });
+      if (table.getBoundingClientRect().width > width + 2 || bad) {
+        errors.push({table: index + 1, cell: bad ? bad.textContent.trim().slice(0, 100) : '',
+          width: table.getBoundingClientRect().width,
+          reason: 'Table cannot fit readable text within page width; use fewer columns or a wider page.'});
+      }
+    });
+    return errors;
   }, __GEOMETRY__);
+  if (layoutErrors.length) {
+    console.error('LAYOUT_ERRORS:' + JSON.stringify(layoutErrors));
+    await browser.close();
+    process.exit(6);
+  }
 """.replace('__GEOMETRY__', json.dumps({'width': width, 'height': height}))
 
 

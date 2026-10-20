@@ -31,7 +31,7 @@ Font sizing is handled at two levels:
 | Body text | 13px | Base size |
 | Blockquotes | 12.5px | Nested → 12px |
 | Callout body | 12.5px | Callout lists → 12px |
-| Tables | 11.5px | JS: 5+ columns → 10px, 7+ columns → 9px |
+| Tables | 11.5px | No column-count shrinking; explicit density classes may use 10–10.5px |
 | Nested lists | 12.5px | 2nd level → 12px |
 | Code blocks | 10.5px | Fixed |
 
@@ -41,6 +41,18 @@ Font sizing is handled at two levels:
 |-------|-----------|----------|
 | `.text-sm` | 12px | Dense H4 subsections, detailed specs |
 | `.text-xs` | 11px | Reference tables, appendix content |
+
+### P1 tables
+
+A4 tables remain semantic tables with all columns and cells, fixed page-width
+layout and wrapping (including inline code/CJK). `thead` is a repeating header
+group with an explicit keep rule; body rows taller than 80% of a page may split.
+Before PDF delivery, cells below 10px, fewer than two ems of inner width, horizontal
+cell overflow or a table wider than the printable area fail with table/cell
+diagnostics. Choose a wider page or simplify the table; no silent compression,
+screenshots or A4 mobile-card substitution is applied. Existing mobile cards
+remain mobile-only.
+
 
 ## Code Syntax Highlighting
 
