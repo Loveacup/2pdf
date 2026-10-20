@@ -111,6 +111,7 @@ python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin 
 | `--allow-origin ORIGIN` | Repeatable exact HTTP(S) origin authorization (`scheme://host[:port]`, no path). Without it, remote resources fail before delivery. Every request and redirect is checked; no cookies, proxy environment or implicit authentication |
 
 **Themes** auto-discover from `scripts/themes/*.css` (currently 18; names are listed by the renderer). `--theme auto` routes on visible prose: URLs, code spans/blocks, and Markdown table rows do not add keyword signals; code length is CJK-aware and Mermaid markup does not count as executable-code density. Low-code A4 documents route among light palettes.
+Theme catalog: `academic`, `blue`, `dark`, `dracula`, `editorial`, `gruvbox-dark`, `gruvbox-light`, `kami`, `minimalist`, `newsletter`, `nord`, `sepia`, `social-card`, `solarized-dark`, `solarized-light`, `swiss`, `warm-academic`, `wechat-article`.
 
 **Source frontmatter → PDF metadata**: `title` / `author` / `description` / `tags` / `aliases` / `created` / `modified` map to `/Title /Author /Subject /Keywords /CreationDate /ModDate`. `/Author` is written only when frontmatter explicitly declares `author` (privacy guard); `--no-metadata` disables the whole step.
 
