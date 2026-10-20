@@ -1,6 +1,4 @@
 """Local Markdown image embedding and browser-native decode validation."""
-import base64
-import mimetypes
 import re
 from html import escape
 from pathlib import Path
@@ -10,18 +8,16 @@ class LocalImageError(ValueError):
     """A local source image cannot be read or decoded."""
 
 
-def embed_local_images(md_text, md_dir):
+def embed_local_images(md_text, md_dir, policy=None):
+    if policy is None:
+        from resource_policy import ResourcePolicy
+        policy = ResourcePolicy(Path(md_dir) / "document.md")
     def replace(match):
         alt, src = match.groups()
-        if src.startswith(("http://", "https://", "data:")):
-            return match.group(0)
-        path = (Path(md_dir) / src).resolve()
         try:
-            data = path.read_bytes()
-        except OSError as exc:
+            uri = policy.resource(src)
+        except ValueError as exc:
             raise LocalImageError(f"Local image {src!r}: {exc}") from exc
-        mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-        uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
         # Preserve the source reference through embedding so decode errors identify it.
         return (f'<img alt="{escape(alt, quote=True)}" src="{uri}" '
                 f'data-jz-local-source="{escape(src, quote=True)}">')
@@ -30,7 +26,7 @@ def embed_local_images(md_text, md_dir):
 
 
 def local_image_check_js():
-    """Run before producing any artifact; do not change remote/data URI policy."""
+    """Require every embedded document image to decode before delivery."""
     return """
   const imageErrors = await page.evaluate(async () => {
     const errors = [];

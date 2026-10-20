@@ -51,7 +51,7 @@ for page in reader.pages:
 Convert Obsidian Flavored Markdown to styled PDF with perfect Chinese/Japanese/Korean rendering.
 
 **Script**: `scripts/md2pdf_chrome.py`
-**Prerequisites**: From the standalone repository root, run `python3 scripts/maintenance.py init`. It reuses a healthy `~/.venvs/pdf-skill`; if required packages are missing, it invokes the existing explicit `md2pdf_chrome.py --setup` flow, which may install missing packages, download Chromium/vendor assets, and run a smoke render. Node.js is required for bundled Chromium setup; `pandoc` is optional.
+**Prerequisites**: From the standalone repository root, run `python3 scripts/maintenance.py init`. It reuses a healthy `~/.venvs/pdf-skill`; explicit setup may install missing packages and download Chromium/pinned vendor assets. Ordinary conversions are offline by default and never download missing vendor assets. Node.js and a launchable Playwright Chromium or system Chrome are required.
 
 `python3 scripts/maintenance.py check-updates [--json]` queries official PyPI/npm metadata for runtime packages and bundled Mermaid/highlight.js, plus the Playwright package resolved by the current Node setup. It reports reminders only and never installs upgrades. JSON uses schema version 1 (`checked_at`, `overall`, `updates` with `name/source/current/pinned/latest/status/update_available/url`); unavailable metadata or installed versions are marked `unavailable`, and the command exits nonzero when any version cannot be verified.
 
@@ -64,7 +64,8 @@ python scripts/md2pdf_chrome.py <md_file> [pdf_file] [header_text] \
   [--format pdf|png|html|wechat] [--browser playwright|chrome|auto] \
   [--theme NAME] [--page-size A4|430x932] \
   [--verify | --verify-strict] [--require-text TEXT] [--properties] [--byline] [--preview DIR] \
-  [--allow-diagram-errors] [--no-metadata] [--fallback pandoc] \
+  [--allow-diagram-errors] [--no-metadata] \
+  [--resource-root DIR] [--allow-origin ORIGIN] \
   [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]
 
 # First use / environment repair; healthy venv is reused
@@ -83,6 +84,8 @@ python scripts/md2pdf_chrome.py report.md ~/output/report.pdf "My Report Title"
 python scripts/md2pdf_chrome.py note.md out.pdf --browser auto --verify
 python scripts/md2pdf_chrome.py note.md out.pdf --verify-strict --require-text "Signed: Alex"
 python scripts/md2pdf_chrome.py report.md output.pdf --theme academic --sm "开发路线图" --xs-after "变更历史"
+python scripts/md2pdf_chrome.py notes/report.md out.pdf --resource-root ./assets
+python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin https://images.example.org
 ```
 
 ### Output formats & resilience
@@ -90,7 +93,7 @@ python scripts/md2pdf_chrome.py report.md output.pdf --theme academic --sm "开�
 | Flag | Effect |
 |------|--------|
 | `--format pdf\|png\|html\|wechat` | Output format. `pdf` (default), `png` (full-page screenshot), `html` (standalone), `wechat` (CSS inlined for WeChat paste) |
-| `--browser playwright\|chrome\|auto` | Rendering engine. `playwright` (default, bundled Chromium); `chrome` (system Chrome via `executablePath`); `auto` tries bundled → system Chrome → (pdf only) pandoc, surviving runtime launch failures. Prints actual `engine` + `executable` to stderr |
+| `--browser playwright\|chrome\|auto` | `playwright` (default, bundled Chromium); `chrome` (system Chrome via Playwright `executablePath`); `auto` tries bundled → system Chrome. All use the same resource policy and fresh context, never a personal profile. Prints actual `engine` + `executable` |
 | `--page-size A4\|WxH` | `A4` (default) or a custom mobile size like `430x932`. Validated up front |
 | `--setup` | One-time idempotent bootstrap: persistent venv + deps + Playwright Chromium + pinned vendor assets (mermaid/hljs, `vendor.lock.json`) + smoke render acceptance. Alias: `--preflight --fix` |
 | `--preflight [--json]` | Health-check current interpreter, deps, browsers, pandoc, vendored assets, persistent venv — no rendering. Exit 0 ok / 1 fatal / 2 missing doc |
@@ -99,20 +102,22 @@ python scripts/md2pdf_chrome.py report.md output.pdf --theme academic --sm "开�
 | `--require-text TEXT` | Repeatable PDF body-text sentinel; implies `--verify`. Missing text fails delivery. Opt in to the expected source content; text is not inferred from image pixels |
 | `--allow-diagram-errors` | Explicitly allow a PDF to be produced even when some Mermaid diagrams failed (default: **fail-fast, exit 3, no output file**) |
 | `--no-bootstrap` | Disable the automatic venv self-healing re-exec |
-| `--fallback pandoc` | Force the pandoc lifeboat (pandoc → HTML+CSS → system Chrome print-to-pdf). Style NOT faithful, no Mermaid, A4 only. Also auto-triggered by `--browser auto` when no Chromium can launch |
+| `--fallback pandoc` | **Breaking change (P0-B): refuses conversion.** The old pandoc/Chrome CLI path cannot enforce the same request policy. Migrate to `--browser chrome` / `auto`, or initialize bundled Chromium |
 | `--no-metadata` | Skip writing source frontmatter into PDF metadata (including diagram-count keys) |
 | `--properties` | Render YAML frontmatter as a title-adjacent property card; list values use `·`, while `author`, `cli`, and `models` remain in the byline |
 | `--byline` | Render frontmatter `author`, `cli`, and `models` beneath H1 as 撰写 / 协作 CLI / 参与模型 rows; missing fields are omitted |
 | `--preview DIR` | Export page 1 and pages containing named Mermaid charts as 72-dpi PNGs; print their paths |
+| `--resource-root DIR` | Repeatable explicit extra local resource root; default is only the source file's real parent directory. URL-decoded paths and symlinks are checked against real roots |
+| `--allow-origin ORIGIN` | Repeatable exact HTTP(S) origin authorization (`scheme://host[:port]`, no path). Without it, remote resources fail before delivery. Every request and redirect is checked; no cookies, proxy environment or implicit authentication |
 
 **Themes** auto-discover from `scripts/themes/*.css` (currently 18; names are listed by the renderer). `--theme auto` routes on visible prose: URLs, code spans/blocks, and Markdown table rows do not add keyword signals; code length is CJK-aware and Mermaid markup does not count as executable-code density. Low-code A4 documents route among light palettes.
 
 **Source frontmatter → PDF metadata**: `title` / `author` / `description` / `tags` / `aliases` / `created` / `modified` map to `/Title /Author /Subject /Keywords /CreationDate /ModDate`. `/Author` is written only when frontmatter explicitly declares `author` (privacy guard); `--no-metadata` disables the whole step.
 
-**Three-tier fallback** (rendering resilience — the 6-13 incident hardening):
+**Policy-preserving fallback**:
 1. **Primary** — Playwright bundled Chromium (`--browser playwright`, default).
-2. **System Chrome** — `--browser chrome`, or `auto` when bundled Chromium fails to launch.
-3. **Pandoc lifeboat** — `--fallback pandoc`, or `auto` when no Chromium launches (pdf only). Style not faithful; emergency use.
+2. **System Chrome** — `--browser chrome`, or `auto` when bundled Chromium fails; the same isolated Playwright request interception applies.
+3. **Fail closed** — when neither Chromium can render, conversion fails. The former pandoc lifeboat is refused instead of bypassing resource safety.
 
 **Quality-first fail-fast** (the 7-02 `==>` incident hardening — four defense layers):
 1. **Fence-first preprocessing** — code fences & inline code are extracted to placeholders BEFORE `==highlight==`/wikilink/tasklist conversions, so Mermaid thick arrows (`A ==> B`) and code containing `[[ ]]`/`- [ ]` are never mangled.
@@ -172,7 +177,7 @@ Obsidian MD → preprocess → Python markdown (md_in_html) → section wrap →
 2. **Convert**: Python `markdown` library with extensions: `tables`, `fenced_code`, `toc`, `sane_lists`, `md_in_html`, `footnotes`
 3. **Section Wrap**: Post-process HTML — wrap `<h2>` into `<section class="doc-section">`, wrap `<h3>` into `<div class="doc-subsection">`
 4. **Mermaid**: Convert mermaid code blocks → `<div class="mermaid">`, load pinned Mermaid JS vendored next to the script (`scripts/mermaid.min.js` + `vendor.lock.json`, downloaded by `--setup`), auto-scale SVG
-5. **Syntax Highlighting**: highlight.js CDN with theme-aware styling (atom-one-dark / atom-one-light)
+5. **Syntax Highlighting**: pinned local highlight.js and theme-aware CSS (atom-one-dark / atom-one-light), embedded into the invocation HTML; no CDN fallback
 6. **Content Adaptation JS**: Adaptive table font sizing (5+ cols → 10px, 7+ → 9px), section density analysis (auto-shrink dense sections)
 7. **Render**: Playwright Chromium headless — `waitForFunction` waits for Mermaid SVG rendering, `networkidle` ensures all resources loaded, then `page.pdf()` with A4 format + page numbers + native bookmarks & accessibility tags (`outline: true, tagged: true`)
 8. **Post-process and deliver**: Keep **all** generated pages, including bitmap/vector-only pages, short endings and intentional blanks. Write metadata via pypdf `clone_from` (preserves native outline/tags); use pypdf bookmarks only when no native outline exists. Verify the staged PDF when requested, then atomically publish it.
@@ -180,7 +185,11 @@ Obsidian MD → preprocess → Python markdown (md_in_html) → section wrap →
 For pagination rules, font sizing tables, Mermaid details, callout types, and CSS customization, see `references/md2pdf-details.md`.
 
 ### Pitfalls
-**Local image failures stop delivery.** Missing/unreadable Markdown-local images name their source reference; browser-native decode rejects corrupt or unsupported image content before printing. A failed conversion does not create a final PDF or modify an existing target. Remote URLs/data URIs retain their previous handling; this is not an offline policy or resource sandbox. The legacy `md2pdf_browser.py` shares these image, page-preservation and PDF staging safeguards and supports `--verify`, `--verify-strict`, and repeatable `--require-text`.
+**P0-B resource migration (breaking):** all four formats are offline by default. Local images/styles/fonts/SVG/iframe content must be beneath the real source directory; grant intentional sibling assets with repeatable `--resource-root DIR`. Move remote assets locally or authorize each exact origin with repeatable `--allow-origin ORIGIN`; cross-origin redirects need their own authorization. Resources are recursively frozen as data URIs before Chromium, then guarded again by CSP and request interception. Author-written scripts and event handlers never run; only controlled render scripts do. Missing vendor files require explicit `maintenance.py init`, never an automatic CDN fallback. Allowed remote services may themselves forward data; that server-side behavior is outside this policy.
+
+**All-format isolated delivery:** HTML, Node scripts and post-processing live in one private per-invocation staging directory. Same normalized output targets are nonblocking kernel-locked: one concurrent writer fails immediately; different targets remain independent. Normal exit, exceptions and handled SIGINT/SIGTERM cancellation remove the invocation's stage and release ownership. Hard kills may leave a private directory, but it is never reused. New accepted artifacts atomically replace prior outputs; failures preserve prior bytes. Kernel lock files carry no ownership state and cannot permanently block later runs.
+
+**Local image failures stop delivery.** Missing/unreadable images report their source; browser decoding rejects corrupt images before publication. Legacy `md2pdf_browser.py` uses the same resource, staging, ownership and cancellation safeguards and accepts `--resource-root`, `--allow-origin`, `--verify`, `--verify-strict`, and `--require-text`.
 
 
 **Mermaid failures never reach the PDF (by design).** If a render exits with code 3 and a `图#N` error listing, the md has a genuine Mermaid syntax error — fix the listed block and re-run. Historical note: thick arrows `==>` used to be destroyed by the highlight preprocessor (2026-07-02 incident); fence-first protection fixed this permanently, so `==>` is safe to use now.

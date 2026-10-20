@@ -1,6 +1,6 @@
 # 2pdf 排版优化路线图
 
-> 本文基于 2pdf 基线源码、文档和固定上游提交制定分阶段合同。**P0-A 已按下方证据实施；P0-B/P1/P2 尚未实施**，不作性能承诺。在兼容性证据充分前，不替换 Chromium 主链。PDF 合并、拆分、旋转、水印、加密、表单读取/填写及基础提取属于独立能力链，本路线图不迁移、不裁剪它们。
+> 本文基于 2pdf 基线源码、文档和固定上游提交制定分阶段合同。**P0-A/P0-B 已按下方证据实施；P1/P2 尚未实施**，不作性能承诺。在兼容性证据充分前，不替换 Chromium 主链。PDF 合并、拆分、旋转、水印、加密、表单读取/填写及基础提取属于独立能力链，本路线图不迁移、不裁剪它们。
 
 ## 结论摘要
 
@@ -32,7 +32,7 @@
 
 ## 审核结论与实施边界
 
-本方案按 **P0-A → P0-B → P1 → P2** 分阶段交付。先防止内容损失，再处理隔离与资源边界，最后改善版式。P0-A 的已实现接口及证据见文末；其余接口和行为仍是待实现合同。
+本方案按 **P0-A → P0-B → P1 → P2** 分阶段交付。先防止内容损失，再处理隔离与资源边界，最后改善版式。P0-A/P0-B 的已实现接口及证据见文末；P1/P2 仍是待实现合同。
 
 2026-09-29 审核实测：临时构造两页 PDF，第一页为可见蓝色矢量图形，第二页为 `Signed: Alex`。直接调用当时的 `remove_blank_pages()`，结果为 `before 2 / removed 2 / after 0`。这是函数级复现，不扩大为所有正常转换均会失败；输入均为合成素材。旧规则会删除任意无可抽取文本页，以及少于 50 字的尾页；P0-A 已停止此行为。
 
@@ -97,7 +97,7 @@
 
 - 上游源码与许可证链接保留固定 SHA；本方案不引用未经测量的性能结论。
 - 本地源码引用行号仅用于导航，以函数实际行为为准。
-- **P0-A（2026-10-20）已交付，P0-B/P1/P2 未开始**。PDF 编辑、表单链及分页策略未改；未升级依赖或替换解析器。`remove_blank_pages()` 保留全部原始字节；主/legacy 路径共享本地图片诊断、浏览器 decode 和 PDF 暂存原子交付。新增 `--verify-strict` 与可重复 `--require-text TEXT`；独立 verifier 的 `--strict`、`--require-text` 与 JSON `checks` 显示必需性、状态及原因。
+- **P0-A/P0-B（2026-10-20）已交付，P1/P2 未开始**。PDF 编辑、表单链及分页策略未改；未升级依赖或替换解析器。P0-A 保留全部生成页并增加 `--verify-strict`、`--require-text`；P0-B 增加全格式私有暂存、非阻塞输出所有权、`--resource-root`、默认离线及 `--allow-origin`，主/legacy 共享同等资源与交付边界。旧 pandoc 救生艇明确拒绝，迁移指导见下。
 
 ### P0-A 验收记录
 
@@ -134,4 +134,42 @@ pdftoppm -scale-to 650 -png \"$TMP/after-image.pdf\" \"$TMP/after-image\"
 # 五类固定页及真实图片页/签名页逐页转 PNG，并查看接触表；另查看 CJK 原生书签样本首页。
 ```
 
-P0-A 真实渲染与内容/视觉验收通过；完整 bundled-only 回归仍有上述安装前置条件。未声称完成 P0-B 的全格式临时隔离、同目标互斥、资源根或离线策略。
+P0-A 当时的真实渲染与内容/视觉验收通过；当时 bundled-only 回归仍有上述安装前置条件。P0-B 的独立实施及后续验证如下。
+
+### P0-B 验收记录
+
+证据目录：`/private/tmp/2pdf-p0b-evidence.D7EZsQ`。全部输入、既有目标哨兵与 loopback 服务均为合成样本，用户原文件只读。`commands*/*.json` 保存实际 CLI argv、退出码、stdout/stderr；最终两轮还保存服务端 `counts` 与请求头。`artifacts*` 保留产物；PNG 哨兵用 Tesseract 实际识别，PDF 哨兵由 pypdf 抽取，HTML/公众号直接检查正文，另查看页面图像。
+
+| 验收项 | 实际结果 |
+|---|---|
+| 四格式并发 | PDF、PNG、HTML、公众号各启动 10 个并发 CLI，输入均为 `same.md`，内容/输出目录不同。40 个产物逐一包含自身唯一哨兵且不含其余 9 个；暂存目录清理。 |
+| 所有权、失败与取消 | 四格式均在首任务已进入本地 `/hold` 服务后启动同目标任务，后者立即失败且目标字节不变；首任务 SIGTERM 退出 130、清理暂存；同时运行的另一目标 HTML 成功。随后顺序覆盖成功；再注入损坏 SVG，失败且保留已接受产物。另以独立持锁进程硬杀证明内核所有权释放，不靠永久哨兵。 |
+| 本地根 | 四格式以显式额外根读取空格/Unicode 图片成功；未授权 `../`、根外绝对路径、symlink 逃逸均失败并保持既有产物；HTML/PDF 不含根外正文 sentinel。单元测试另覆盖 percent-encoded `..` 与真实路径检查。 |
+| 离线零请求 | 四格式分别测 HTML image、CSS 间接 URL、SVG 间接 image、font、iframe、外部 script；全部失败且 loopback 服务计数为零。内联 `fetch`、`new Image` 和事件处理器不执行，文档成功且零请求。另直接向 Chromium 提交未经 Python 预处理的远程 CSS：CSP/请求拦截拒绝并以资源策略错误终止，服务计数仍为零。缺离线 vendor 的 helper 直接报错，不走 CDN。 |
+| 显式远程模式 | 四格式允许来源的 image、CSS、嵌套 SVG 成功；冻结缓存使服务计数为 `/image.png:1, /style.css:1, /nested.svg:1`。未授权来源计数为零；跨来源跳转只命中允许服务器的 `/redirect`，拒绝服务器仍为零。相同来源跳转成功，第二次 `/redirect` 后 `/image.png` 总数变 2。请求无 Cookie/Authorization。 |
+| 兼容与可视 | 既有 `tests/fixtures/sample.md` 加 `--verify` 通过；`run_setup()` 的真实 smoke 子进程通过，测试仅替换安装/下载前置动作，未另发起浏览器安装。另跑显式系统 Chrome smoke，Mermaid 源/渲染均为 1、verify 全通过；legacy 的内联 fetch 被移除且正文哨兵通过。sample 首页、授权图片页、并发 PNG、离线 Mermaid/CJK/高亮页均实际查看。 |
+
+验证命令（`PY=~/.venvs/pdf-skill/bin/python`，`E=/private/tmp/2pdf-p0b-evidence.D7EZsQ`）：
+
+```bash
+JZ2PDF_EVIDENCE_DIR="$E/commands" $PY -m pytest -c tests/pytest.ini tests -q --basetemp="$E/artifacts"
+# 首轮 156 passed / 6 failed：5 项仍缺 bundled headless shell；1 项为损坏图片诊断 source 属性重复，已修复。
+JZ2PDF_EVIDENCE_DIR="$E/commands-final" $PY -m pytest -c tests/pytest.ini tests -m 'not integration' -q
+# 130 passed, 33 deselected，5.96s。
+JZ2PDF_EVIDENCE_DIR="$E/commands-final" $PY -m pytest -c tests/pytest.ini tests/test_isolation_resources.py tests/test_content_preservation.py tests/test_cross_platform_paths.py -m integration -q --basetemp="$E/artifacts-final"
+# 28 passed, 43 deselected，148.42s；覆盖上述所有 P0-B 实际 CLI 验收及 P0-A 图像/严格验收。
+JZ2PDF_EVIDENCE_DIR="$E/commands-bundled" $PY -m pytest -c tests/pytest.ini tests -q --basetemp="$E/artifacts-bundled"
+# bundled 环境由主任务修复后，最终 163 passed，160.50s；含先前 5 个 bundled-only 回归。
+$PY scripts/md2pdf_chrome.py "$E/smoke.md" "$E/smoke-chrome.pdf" --browser chrome --verify
+# exit 0；1 页，源 Mermaid 1 / 成功 1，error=0 warn=0 skipped=0。
+$PY scripts/md2pdf_browser.py "$E/legacy.md" "$E/legacy.pdf" --verify --require-text LEGACY_SENTINEL
+# exit 0；正文哨兵通过，内联文档脚本不执行。
+pdftoppm -f 1 -singlefile -scale-to 1000 -png "$E/smoke-chrome.pdf" "$E/smoke-chrome"
+pdftoppm -f 1 -singlefile -scale-to 900 -png "$E/artifacts/test_existing_sample_verify_an0/sample.pdf" "$E/sample-first"
+pdftoppm -f 1 -singlefile -scale-to 900 -png "$E/artifacts/test_real_cli_roots_unicode_an0/out.pdf" "$E/authorized-root"
+```
+
+**Breaking / 迁移：** 旧远程图片需本地化或逐来源 `--allow-origin`；旧根外资源需 `--resource-root`；任意文档脚本不再运行；缺 vendor 须显式初始化；`--fallback pandoc` 因无法实施等价资源策略而拒绝，改用 `--browser chrome/auto` 或准备 bundled Chromium。联网模式只允许已授权资源在 Python 中冻结；离线模式不进行外部请求。二者均不继承个人浏览器状态，不承诺约束远端服务内部转发。
+
+**阶段结论：** P0-B 五项合同及阶段完成条件均已实测满足；完整套件通过。未运行 Windows 实机，不声称新增 Windows 实机证据；保留跨平台代码与路径行为回归。P1/P2 未开始。
+

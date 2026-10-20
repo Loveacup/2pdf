@@ -61,7 +61,7 @@ Font sizing is handled at two levels:
 
 ## Code Syntax Highlighting
 
-Fenced code blocks are syntax-highlighted via **highlight.js** (CDN):
+Fenced code blocks are syntax-highlighted via pinned **local highlight.js**, embedded as data URIs (no CDN fallback):
 - **Default theme**: `atom-one-dark` (matches dark code block background)
 - **Academic theme**: `atom-one-light` (matches light code block background)
 - CSS overrides ensure highlight.js doesn't conflict with the dark `pre` background
@@ -73,20 +73,29 @@ Chromium generates the outline natively at render time (`page.pdf({ outline: tru
 - Bookmark tree derives from the HTML heading structure — hierarchy and target pages are exact (no text-search page mapping)
 - `tagged: true` additionally emits PDF/UA accessibility structure tags (~2% size cost)
 - All generated pages are retained, including pure image/vector pages, short signatures/tails and intentional blanks. `remove_blank_pages()` returns zero without rewriting the file; text length is never evidence for deletion. Metadata uses pypdf `PdfWriter(clone_from=...)` so native outline and StructTreeRoot survive.
-- The legacy pypdf bookmark builder (`add_pdf_bookmarks`) auto-skips when a native outline exists; it remains as fallback for PDFs without one (e.g. the pandoc lifeboat, which loses bookmarks otherwise)
+- The pypdf bookmark builder (`add_pdf_bookmarks`) auto-skips when a native outline exists and remains available for PDFs without one.
 
 ## Local Image Embedding
 
-Local images in Markdown (`![alt](./img.png)`) are converted to base64 data URIs before rendering:
-- Ensures images display correctly regardless of working directory
-- Skips remote URLs (`http://`, `https://`) and existing data URIs
-- Missing/unreadable local files fail with the source reference. Embedded local images must decode successfully in Chromium before any artifact is printed; corrupt/unsupported image data fails nonzero rather than producing a broken-image PDF. This check also applies to the pandoc lifeboat (and requires a launchable Playwright/Chrome validator when local images are present).
-- MIME types detected automatically via `mimetypes.guess_type()`
-- URLs and data URIs retain the previous handling. P0-A does not restrict local resource roots or establish an offline policy.
+Images are frozen as base64 data URIs before rendering; Chromium checks their decoded dimensions before producing any artifact. Missing/unreadable/corrupt images fail with the source reference. The same policy covers raw HTML, CSS imports/URLs/fonts, SVG references and iframe documents, including resources nested inside data URIs.
+
+### P0-B resource authorization (breaking change)
+
+- **Local roots:** only the source Markdown's real parent directory is implicit. Repeat `--resource-root DIR` to grant sibling asset trees. References are URL-decoded, normalized and symlink-resolved before real-root containment checks. Spaces/Unicode paths work; source files remain read-only. Internal pinned vendor files are read separately and do not grant the document access to `scripts/`.
+- **Offline default:** HTTP(S) resources fail explicitly with a migration hint. Move assets below authorized roots or repeat `--allow-origin https://host[:port]`. This is exact origin matching, not a host/path wildcard. Every resource fetch and redirect is checked; a cross-origin redirect requires separate authorization.
+- **Remote mode:** authorized resources are fetched without proxy environment, cookies, browser profile or implicit authentication, recursively sanitized and frozen. The remote service can itself forward data; this policy does not constrain its internals.
+- **Browser boundary:** a new isolated Playwright context blocks service workers. Request interception permits only the invocation HTML and frozen data resources; CSP denies networking and permits nonce-bearing controlled renderer scripts. Document scripts, event handlers, active embeds and base/refresh elements are removed. Exported HTML/WeChat keeps rendered DOM, not runnable document/render scripts.
+- **Vendor/fallback:** missing local Mermaid/highlight.js/CSS is an error; explicit setup downloads assets, ordinary rendering never does. System Chrome runs through the same Playwright policy. The old `--fallback pandoc` path is deliberately refused because its CLI loading cannot enforce equivalent interception; migrate to `--browser chrome` / `auto`.
+
+### P0-B invocation isolation
+
+PDF, PNG, HTML and WeChat share `pdf_delivery.py` staging. One private directory beside the target holds the HTML, Node scripts, rendered artifact and post-processing files. Nonblocking kernel locks key the normalized real output path: the losing same-target invocation fails immediately; locks release on process exit, and leftover lock inodes hold no ownership state. Different targets remain independent.
+
+Only a valid new artifact replaces the target atomically; PDF additionally applies requested verification. Exceptions and handled SIGINT/SIGTERM remove the private stage and stop only that invocation's Node/browser process group. Hard-kill leftovers are not reused; immediate hard-kill cleanup is not promised.
 
 ## PDF Delivery and Strict Acceptance
 
-Both `md2pdf_chrome.py` and legacy `md2pdf_browser.py` render a PDF into a temporary staging directory beside the target. Renderer success requires a successful process exit and a complete PDF, not the presence of an old target. Bookmarks/metadata and requested verification apply to the staged artifact. Only a successful artifact is atomically moved to the target; failure cleans the stage and leaves existing output bytes unchanged.
+Both renderers use a private same-filesystem staging directory and hold target ownership before reading document resources. Renderer success requires a successful process exit and a valid artifact, not the presence of an old target. Bookmarks/metadata and requested PDF verification apply to the staged artifact; only an accepted artifact is atomically moved to the target.
 
 - `--verify`: runs `verify_pdf.py` in a separate process, rejecting error-level findings. Warnings and skipped checks remain visible, preserving the existing error-only policy.
 - `--verify-strict`: implies `--verify` and also rejects skipped **required** checks. Page parsing/content checks require `pypdf`; Mermaid input requires diagram-count metadata. Optional/not-applicable checks (such as diagram counts for a source without Mermaid) can skip.
@@ -134,7 +143,7 @@ Standard Markdown footnotes via the `footnotes` extension:
 
 Mermaid diagrams in fenced code blocks are automatically rendered:
 
-- **Rendering**: Mermaid JS pinned version (vendored local file via `--setup`, else pinned CDN), `startOnLoad: false` + **per-block `mermaid.parse()` precheck + `mermaid.render()`** for reliable timing and precise error localization
+- **Rendering**: pinned local Mermaid JS (explicitly provisioned by setup; missing vendor fails), `startOnLoad: false` + **per-block `mermaid.parse()` precheck + `mermaid.render()`** for timing and precise error localization
 - **Fail-fast (quality gate)**: failing blocks are collected into `window.__mermaidStatus.errors`; the Python side aborts with **exit 3 and NO output file**, printing block number + error + source head. Diagram content errors never trigger engine downgrade or the pandoc lifeboat. Escape hatch: `--allow-diagram-errors`
 - **Fence-first preprocessing**: code fences and inline code are placeholder-protected before `==highlight==`/wikilink/tasklist conversions — Mermaid thick arrows (`A ==> B`) are safe
 - **Diagram count reconciliation**: total/rendered counts go into PDF metadata (`/JZDiagramTotal`, `/JZDiagramRendered`); `verify_pdf.py` flags mismatches and fuzzy-scans error-bomb text ("Syntax error", doubled-char variants)
@@ -142,7 +151,7 @@ Mermaid diagrams in fenced code blocks are automatically rendered:
 - **Auto-scaling**: After rendering, JS measures each SVG and proportionally scales to fit page (max 580px wide, 650px tall)
 - **Natural sizing**: `useMaxWidth: false` — diagrams render at natural size, then scale down (not stretch up)
 - **ViewBox preservation**: Ensures crisp rendering at any scale via SVG viewBox
-- **Chrome timing**: `--virtual-time-budget=20000` gives Chrome enough virtual time for CDN load + render + post-processing
+- **Chrome timing**: Playwright waits for controlled Mermaid completion before printing; vendor loading is offline.
 
 
 ## Frontmatter display and preview

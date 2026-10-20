@@ -86,14 +86,16 @@ def test_missing_and_unreadable_local_images_fail(tmp_path, renderer, monkeypatc
 
 
 @pytest.mark.parametrize("renderer", [main, legacy])
-def test_embedding_preserves_remote_policy_and_image_content(tmp_path, renderer):
+def test_embedding_enforces_offline_policy_and_preserves_image_content(tmp_path, renderer):
     image = tmp_path / "local.png"
     image.write_bytes(bitmap_bytes())
     embedded = renderer.embed_local_images("![red](local.png)", tmp_path)
     assert base64.b64encode(image.read_bytes()).decode() in embedded
-    for src in ("https://example.invalid/a.png", "http://example.invalid/b.png", "data:image/png;base64,AA=="):
-        original = f"![unchanged]({src})"
-        assert renderer.embed_local_images(original, tmp_path) == original
+    for src in ("https://example.invalid/a.png", "http://example.invalid/b.png"):
+        with pytest.raises(LocalImageError):
+            renderer.embed_local_images(f"![blocked]({src})", tmp_path)
+    data = "data:image/png;base64," + base64.b64encode(image.read_bytes()).decode()
+    assert data in renderer.embed_local_images(f"![embedded]({data})", tmp_path)
 
 
 def test_strict_accepts_image_only_page_and_optional_skips(tmp_path):
@@ -195,7 +197,7 @@ def test_renderer_exit_failure_is_not_success_even_with_a_pdf(tmp_path, monkeypa
     html.write_text("<p>body</p>")
     monkeypatch.setattr(main, "_launch_plan", lambda browser: [("chromium.launch()", "test", "test")])
     monkeypatch.setattr(main, "_node_env", lambda: {})
-    monkeypatch.setattr(main.subprocess, "run", lambda *args, **kwargs:
+    monkeypatch.setattr(main, "run_render_process", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args[0], 1, "", "failed after writing PDF"))
     with pytest.raises(RuntimeError):
         main._render_playwright(html, pdf)

@@ -23,7 +23,9 @@ except ImportError:  # 允许在缺依赖的解释器上仍能跑 --preflight �
 from themes import load_theme, list_themes
 from themes.theme_router import route as route_theme, is_palette, list_palettes
 from image_assets import embed_local_images, local_image_check_js, LocalImageError
-from pdf_delivery import staged_pdf, DeliveryError
+from pdf_delivery import staged_pdf, staged_output, run_render_process, DeliveryError
+from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_html,
+                             browser_policy_js, browser_resource_check_js)
 
 # 支持的输出格式
 VALID_FORMATS = ("pdf", "png", "html", "wechat")
@@ -225,27 +227,20 @@ def _venv_python():
 
 
 def get_mermaid_src():
-    """Return mermaid script src — local pinned copy if available, else pinned CDN."""
-    if MERMAID_LOCAL.exists():
-        return MERMAID_LOCAL.resolve().as_uri()
-    return MERMAID_CDN
+    """Return the required offline pinned vendor, never a CDN fallback."""
+    return vendor_uri(MERMAID_LOCAL)
 
 
 def _hljs_js_src():
-    """highlight.js 脚本地址：本地 pin 副本优先（--setup 下载），否则 pinned CDN。"""
-    if HLJS_LOCAL.exists():
-        return HLJS_LOCAL.resolve().as_uri()
-    return HLJS_CDN
+    """Return the required offline syntax highlighter."""
+    return vendor_uri(HLJS_LOCAL)
 
 
 def _hljs_css_src(theme):
-    """hljs 样式表地址：本地副本优先，否则 pinned CDN。"""
+    """Return the required offline highlighter stylesheet."""
     from themes import load_theme as _lt
     name = _lt(theme).hljs_theme
-    local = HLJS_STYLES_DIR / f"{name}.min.css"
-    if local.exists():
-        return local.resolve().as_uri()
-    return f"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@{HLJS_PIN}/build/styles/{name}.min.css"
+    return vendor_uri(HLJS_STYLES_DIR / f"{name}.min.css")
 
 
 def wrap_sections(html):
@@ -495,8 +490,10 @@ def _page_margin(page_size):
 
 
 def build_html(md_path, header_text, directives=None, theme="auto", page_size="A4",
-               properties=False, byline=False):
+               properties=False, byline=False, resource_policy=None):
     md_path = Path(md_path)
+    policy = resource_policy or ResourcePolicy(md_path)
+    header_text = html_escape(str(header_text), quote=True)
     with open(md_path, "r", encoding="utf-8") as f:
         md_text = f.read()
 
@@ -510,7 +507,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
     md_text, _code_store = protect_code_spans(md_text)
     md_text = preprocess_markdown(md_text)
     # Embed local images as base64 data URIs
-    md_text = embed_local_images(md_text, md_path.parent)
+    md_text = embed_local_images(md_text, md_path.parent, policy)
     md_text = restore_code_spans(md_text, _code_store)
 
     # Theme routing: auto resolves to a palette/legacy name, otherwise pass through.
@@ -538,6 +535,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
         body,
         flags=re.DOTALL,
     )
+    body = policy.html(body)
     has_mermaid = 'class="mermaid"' in body
     if has_mermaid:
         body = re.sub(
@@ -705,7 +703,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
         .wide-table-kv-val code { white-space: normal; word-break: break-all; }
         """
 
-    return f"""<!DOCTYPE html>
+    return seal_html(f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -1026,7 +1024,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
 {mermaid_script}
 </head>
 <body class="{body_class}">
-{body}
+<!--DOCUMENT_BODY-->
 <script>
   // Content-adaptive sizing: tables + section density analysis
   document.addEventListener('DOMContentLoaded', function() {{
@@ -1109,29 +1107,7 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
   }});
 </script>
 </body>
-</html>"""
-
-
-def _localize_mermaid_src(html):
-    """Replace CDN mermaid script with local pinned copy for file:// access.
-
-    本地副本存 scripts/ 旁（持久、跨平台），不再用 /tmp（重启即失、Windows 无此路径）。
-    """
-    if not MERMAID_LOCAL.exists():
-        try:
-            import urllib.request
-            print(f"  📥 Downloading mermaid.min.js {MERMAID_PIN} ...")
-            urllib.request.urlretrieve(MERMAID_CDN, str(MERMAID_LOCAL))
-            _record_vendor("mermaid", MERMAID_PIN, MERMAID_LOCAL)
-        except Exception:
-            return html  # keep CDN version
-
-    html = re.sub(
-        r'<script src="https://cdn\.jsdelivr\.net/npm/mermaid[^"]*"',
-        lambda _match: f'<script src="{MERMAID_LOCAL.resolve().as_uri()}"',
-        html,
-    )
-    return html
+</html>""").replace("<!--DOCUMENT_BODY-->", body)
 
 
 def _record_vendor(name, version, path):
@@ -1328,10 +1304,11 @@ def _render_playwright(html_path, pdf_path, page_size="A4", browser="playwright"
 const {{ chromium }} = require('playwright');
 (async () => {{
   const browser = await {launch_expr};
-  const page = await browser.newPage();
+{browser_policy_js(html_path)}
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {local_image_check_js()}
 {_mermaid_wait_and_check_js(wait_timeout, allow_diagram_errors)}
+{browser_resource_check_js()}
   await page.pdf({{
     path: {json.dumps(str(pdf_path.resolve()))},
     {pw_format},
@@ -1347,17 +1324,18 @@ const {{ chromium }} = require('playwright');
   console.log('OK');
 }})();
 """
-        script_path = Path(tempfile.gettempdir()) / "pw_render.js"
+        script_path = html_path.parent / "pw_render.js"
         script_path.write_text(script, encoding="utf-8")
-        result = subprocess.run(
-            ["node", str(script_path)],
-            capture_output=True, text=True, timeout=180, env=_node_env(),
+        result = run_render_process(
+            ["node", str(script_path)], text=True, env=_node_env(),
         )
         # M1.2 exit 3 = Mermaid 内容错误：立即终止，不降级引擎、不转 pandoc
         if result.returncode == 3:
             raise MermaidRenderError(_format_mermaid_errors(result.stderr))
         if result.returncode == 4:
             raise LocalImageError(result.stderr.strip())
+        if result.returncode == 5:
+            raise ResourceError(result.stderr.strip())
         if result.returncode == 0 and pdf_path.exists() and pdf_path.stat().st_size >= 1024:
             scale_match = re.search(r"MERMAID_SCALE_WARNINGS:(\[[^\n]*\])", result.stdout)
             if scale_match:
@@ -1378,35 +1356,32 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
               theme="blue", page_size="A4", browser="playwright",
               fallback=None, write_metadata=True, allow_diagram_errors=False,
               properties=False, byline=False, verify=False, verify_strict=False,
-              required_text=()):
+              required_text=(), resource_roots=(), allowed_origins=()):
     target = Path(pdf_path) if pdf_path else Path(md_path).with_suffix(".pdf")
     with staged_pdf(target, md_path, verify, verify_strict, required_text) as staged:
         _generate_pdf(md_path, staged, header_text, directives, theme, page_size, browser,
-                      fallback, write_metadata, allow_diagram_errors, properties, byline)
+                      fallback, write_metadata, allow_diagram_errors, properties, byline,
+                      ResourcePolicy(md_path, resource_roots, allowed_origins))
     print(f"✅ {target.name} ({target.stat().st_size / 1024:.0f} KB)")
 
 
 def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None,
                   theme="blue", page_size="A4", browser="playwright",
                   fallback=None, write_metadata=True, allow_diagram_errors=False,
-                  properties=False, byline=False):
+                  properties=False, byline=False, resource_policy=None):
     md_path = Path(md_path)
     pdf_path = Path(pdf_path) if pdf_path else md_path.with_suffix(".pdf")
     header_text = header_text or md_path.stem
 
     html = build_html(md_path, header_text, directives, theme=theme, page_size=page_size,
-                      properties=properties, byline=byline)
+                      properties=properties, byline=byline, resource_policy=resource_policy)
 
-    # Localize Mermaid JS for file:// rendering
-    if 'class="mermaid"' in html:
-        html = _localize_mermaid_src(html)
-
-    html_path = Path(tempfile.gettempdir()) / f"{md_path.stem}.html"
+    html_path = pdf_path.parent / "document.html"
     html_path.write_text(html, encoding="utf-8")
 
     diagram_stat = None
     if fallback == "pandoc":
-        _validate_fallback_images(html_path)
+        # The lifeboat must fail closed rather than bypass resource interception.
         _render_pandoc_fallback(md_path, pdf_path, theme=theme, page_size=page_size)
     else:
         try:
@@ -1414,8 +1389,8 @@ def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None,
                 html_path, pdf_path, page_size=page_size, browser=browser,
                 allow_diagram_errors=allow_diagram_errors)
         except _NeedPandoc as e:
-            print(f"  ⚠️  {e} → 转 pandoc 救生艇", file=sys.stderr)
-            _validate_fallback_images(html_path)
+            print(f"  ⚠️  {e}；旧 pandoc 路径无法执行同等资源策略，将拒绝交付", file=sys.stderr)
+            # The lifeboat must fail closed rather than bypass resource interception.
             _render_pandoc_fallback(md_path, pdf_path, theme=theme, page_size=page_size)
 
 
@@ -1661,75 +1636,10 @@ def export_preview_pages(pdf_path, md_path, output_dir):
 # ===== pandoc 救生艇（第三路 fallback） =====
 
 
-def _validate_fallback_images(html_path):
-    """The lifeboat must not bypass browser-native local image decoding."""
-    if 'data-jz-local-source=' not in html_path.read_text(encoding="utf-8"):
-        return
-    plan = _launch_plan("auto")
-    last_error = ""
-    for launch, _engine, _exe in plan:
-        script = f"""
-const {{ chromium }} = require('playwright');
-(async () => {{
-  const browser = await {launch};
-  const page = await browser.newPage();
-  await page.goto({json.dumps(html_path.resolve().as_uri())}, {{waitUntil: 'networkidle'}});
-{local_image_check_js()}
-  await browser.close();
-}})();
-"""
-        result = subprocess.run(["node", "-e", script], env=_node_env(),
-                                capture_output=True, text=True, timeout=120)
-        if result.returncode == 4:
-            raise LocalImageError(result.stderr.strip())
-        if result.returncode == 0:
-            return
-        last_error = result.stderr
-    raise LocalImageError(f"Cannot validate local images before pandoc fallback: {last_error}")
-
-
 def _render_pandoc_fallback(md_path, pdf_path, theme="auto", page_size="A4"):
-    """pandoc → standalone HTML（注入主题 CSS）→ 系统 chrome --print-to-pdf。
-
-    丢弃自研管线（callout/section/自适应字号/Mermaid），仅 A4，绝不静默（调用处已告警）。
-    """
-    md_path = Path(md_path)
-    pdf_path = Path(pdf_path)
-    chrome = _find_system_chrome()
-    pandoc = shutil.which("pandoc")
-    print("  ⚠️  pandoc 救生艇：样式不保真，Mermaid 不渲染", file=sys.stderr)
-    if not chrome:
-        raise RuntimeError("pandoc fallback 需系统 Chrome 做 print-to-pdf（未找到）")
-    if not pandoc:
-        raise RuntimeError("pandoc fallback 需 pandoc（brew install pandoc）")
-    if page_size != "A4":
-        print("  ⚠️  救生艇仅 A4，忽略自定义 page-size", file=sys.stderr)
-    tmp = Path(tempfile.mkdtemp(prefix="md2pdf_fb_"))
-    try:
-        css = tmp / "theme.css"
-        try:
-            if theme == "auto":
-                theme = "blue"
-            css.write_text(load_theme(theme).css, encoding="utf-8")
-        except Exception:
-            css.write_text("", encoding="utf-8")
-        html = tmp / (md_path.stem + ".html")
-        subprocess.run(
-            [pandoc, str(md_path), "-f", "gfm+footnotes", "-t", "html5",
-             "--standalone", "--embed-resources", "--highlight-style=tango",
-             "--css", str(css), "-o", str(html)],
-            check=True, timeout=120,
-        )
-        subprocess.run(
-            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
-             f"--user-data-dir={tmp}/profile", "--no-pdf-header-footer",
-             f"--print-to-pdf={pdf_path}", html.resolve().as_uri()],
-            check=True, timeout=180, capture_output=True,
-        )
-        if not pdf_path.exists() or pdf_path.stat().st_size < 1024:
-            raise RuntimeError("pandoc fallback 产物为空")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    """Refuse the old lifeboat: pandoc/Chrome CLI cannot enforce request policy."""
+    raise ResourceError("Pandoc fallback is disabled: it cannot enforce the P0-B resource policy. "
+                        "Install Playwright Chromium or use --browser chrome.")
 
 
 # ===== preflight 健康检查 =====
@@ -1929,7 +1839,8 @@ def run_setup():
     if _ensure_vendor():
         print(f"  ✅ vendor: mermaid {MERMAID_PIN} + hljs {HLJS_PIN}（{VENDOR_LOCK.name}）")
     else:
-        print("  ⚠️  部分 vendor 资源未本地化（渲染时回退 CDN）")
+        print("  ❌ 部分离线 vendor 缺失；普通转换不会回退 CDN")
+        failures.append("vendor")
 
     # 4) pandoc（救生艇，warn 级）
     if shutil.which("pandoc"):
@@ -1996,9 +1907,9 @@ def run_preflight(md_path=None, want_format="pdf", as_json=False, browser="playw
     chk("playwright:bundled", okwarn(bundled_ok),
         "npx playwright install chromium（或 python3 scripts/maintenance.py init）")
     chk("system-chrome", okwarn(chrome_ok),
-        "安装 Google Chrome（--browser chrome / auto 第二路 / pandoc 救生艇需要）")
+        "安装 Google Chrome（--browser chrome / auto 第二路需要）")
     chk("pandoc", okwarn(pandoc_ok),
-        f"{_pandoc_install_hint()}（pandoc 救生艇需要）")
+        f"{_pandoc_install_hint()}（仅环境信息；排版救生艇已因资源策略停用）")
     if browser == "playwright":
         engine_ok = bundled_ok
         engine_hint = "默认 --browser playwright 需要 bundled Chromium：npx playwright install chromium；或改用 --browser auto/chrome"
@@ -2006,13 +1917,13 @@ def run_preflight(md_path=None, want_format="pdf", as_json=False, browser="playw
         engine_ok = chrome_ok
         engine_hint = "--browser chrome 需要系统 Chrome/Chromium"
     else:
-        engine_ok = bundled_ok or chrome_ok  # pandoc 救生艇同样依赖系统 Chrome 打印
+        engine_ok = bundled_ok or chrome_ok
         engine_hint = "--browser auto 无可启动的 Chromium（bundled 与系统 Chrome 均缺）"
     chk(f"engine:{browser}", okfail(engine_ok), engine_hint)
     chk("mermaid-vendor", okwarn(MERMAID_LOCAL.exists()),
-        f"mermaid {MERMAID_PIN} 本地副本缺失（--setup 下载；否则渲染时联网取 pinned CDN）")
+        f"mermaid {MERMAID_PIN} 本地副本缺失（显式运行 maintenance.py init；普通转换不回退 CDN）")
     chk("hljs-vendor", okwarn(HLJS_LOCAL.exists()),
-        "highlight.js 本地副本缺失（--setup 下载；否则渲染时走 CDN，离线降级）")
+        "highlight.js 本地副本缺失（显式运行 maintenance.py init；普通转换不回退 CDN）")
     chk("venv:persistent", okwarn(_venv_python().exists()),
         f"持久 venv 未建（{VENV_DIR}）；跑 python3 scripts/maintenance.py init")
 
@@ -2051,6 +1962,7 @@ CLI_USAGE = (
     "[--fallback pandoc] [--setup] [--preflight [--json] [--fix]] "
     "[--verify | --verify-strict] [--require-text TEXT] [--allow-diagram-errors] [--no-bootstrap] [--no-metadata] "
     "[--properties] [--byline] [--preview DIR] "
+    "[--resource-root DIR] [--allow-origin ORIGIN] "
     "[--theme NAME] [--page-size A4|430x932] [--sm PATTERN] [--xs PATTERN] "
     "[--sm-after PATTERN] [--xs-after PATTERN]"
 )
@@ -2079,6 +1991,8 @@ def parse_cli_args(argv):
     verify = False
     verify_strict = False
     required_text = []
+    resource_roots = []
+    allowed_origins = []
     allow_diagram_errors = False
     setup = False
     no_bootstrap = False
@@ -2154,6 +2068,11 @@ def parse_cli_args(argv):
             required_text.append(argv[i + 1])
             verify = True
             i += 2
+        elif arg in ("--resource-root", "--allow-origin"):
+            if i + 1 >= len(argv):
+                raise ValueError(f"{arg} requires a value")
+            (resource_roots if arg == "--resource-root" else allowed_origins).append(argv[i + 1])
+            i += 2
         elif arg == "--allow-diagram-errors":
             allow_diagram_errors = True
             i += 1
@@ -2181,6 +2100,8 @@ def parse_cli_args(argv):
         "verify": verify,
         "verify_strict": verify_strict,
         "required_text": required_text,
+        "resource_roots": resource_roots,
+        "allowed_origins": allowed_origins,
         "allow_diagram_errors": allow_diagram_errors,
         "setup": setup,
         "no_bootstrap": no_bootstrap,
@@ -2208,20 +2129,16 @@ def output_path_for(md_path, fmt, out_path=None):
 def inline_css(html):
     """将 <style> 中的 CSS 内联到元素 style 属性，便于微信粘贴。"""
     import css_inline  # 延迟导入，缺失时不影响模块导入
-    from urllib.parse import urlsplit
-    from urllib.request import url2pathname
-
-    # css_inline's native loader does not decode Windows file URIs correctly.
-    # Embed local styles first; the same URI decoding also works on macOS.
-    def embed_local_style(match):
-        uri = urlsplit(match.group(1))
-        raw_path = ("//" + uri.netloc if uri.netloc else "") + uri.path
-        css = Path(url2pathname(raw_path)).read_text(encoding="utf-8")
+    def embed_style(match):
+        uri = match.group(1)
+        if not uri.startswith("data:text/css;base64,"):
+            raise ResourceError("Stylesheets must be frozen by the resource policy before CSS inlining")
+        css = base64.b64decode(uri.split(",", 1)[1]).decode("utf-8")
         return "<style>" + css + "</style>"
 
-    html = re.sub(r'''<link\b(?=[^>]*\brel=["']stylesheet["'])[^>]*\bhref=["'](file:[^"']*)["'][^>]*>''',
-                  embed_local_style, html, flags=re.IGNORECASE)
-    return css_inline.inline(html)
+    html = re.sub(r'''<link\b(?=[^>]*\brel=["']stylesheet["'])[^>]*\bhref=["']([^"']*)["'][^>]*>''',
+                  embed_style, html, flags=re.IGNORECASE)
+    return css_inline.CSSInliner(load_remote_stylesheets=False).inline(html)
 
 
 def _render_playwright_output(html_path, out_path, fmt, page_size="A4", browser="playwright",
@@ -2248,6 +2165,7 @@ def _render_playwright_output(html_path, out_path, fmt, page_size="A4", browser=
     else:
         # html / wechat：取完整渲染后的 DOM，写到 stdout（base64）由 Python 落盘
         action = """
+  await page.evaluate(() => document.querySelectorAll('script').forEach(el => el.remove()));
   const content = await page.content();
   process.stdout.write('__HTML_START__' + Buffer.from(content).toString('base64') + '__HTML_END__');"""
 
@@ -2263,19 +2181,19 @@ def _render_playwright_output(html_path, out_path, fmt, page_size="A4", browser=
 const {{ chromium }} = require('playwright');
 (async () => {{
   const browser = await {launch_expr};
-  const page = await browser.newPage();
+{browser_policy_js(html_path)}
   await page.goto({json.dumps(html_path.resolve().as_uri())}, {{ waitUntil: 'networkidle', timeout: 120000 }});
 {local_image_check_js()}
 {common_wait}
+{browser_resource_check_js()}
 {action}
   await browser.close();
 }})();
 """
-        script_path = Path(tempfile.gettempdir()) / "pw_render_output.js"
+        script_path = html_path.parent / "pw_render_output.js"
         script_path.write_text(script, encoding="utf-8")
-        result = subprocess.run(
-            ["node", str(script_path)],
-            capture_output=True, text=True, timeout=180, env=_node_env(),
+        result = run_render_process(
+            ["node", str(script_path)], text=True, env=_node_env(),
         )
 
         # M1.2 exit 3 = Mermaid 内容错误：立即终止，不降级引擎
@@ -2283,6 +2201,8 @@ const {{ chromium }} = require('playwright');
             raise MermaidRenderError(_format_mermaid_errors(result.stderr))
         if result.returncode == 4:
             raise LocalImageError(result.stderr.strip())
+        if result.returncode == 5:
+            raise ResourceError(result.stderr.strip())
 
         if fmt in ("html", "wechat"):
             out = result.stdout
@@ -2304,7 +2224,8 @@ def md_to_output(md_path, out_path=None, fmt="pdf", header_text=None,
                  directives=None, theme="blue", page_size="A4",
                  browser="playwright", fallback=None, write_metadata=True,
                  allow_diagram_errors=False, properties=False, byline=False,
-                 verify=False, verify_strict=False, required_text=()):
+                 verify=False, verify_strict=False, required_text=(),
+                 resource_roots=(), allowed_origins=()):
     """按格式分发。pdf 走原有 md_to_pdf 路径，其余渲染 png/html/wechat。"""
     md_path = Path(md_path)
     if fmt == "pdf":
@@ -2313,26 +2234,21 @@ def md_to_output(md_path, out_path=None, fmt="pdf", header_text=None,
                   fallback=fallback, write_metadata=write_metadata,
                   allow_diagram_errors=allow_diagram_errors,
                   properties=properties, byline=byline, verify=verify,
-                  verify_strict=verify_strict, required_text=required_text)
+                  verify_strict=verify_strict, required_text=required_text,
+                  resource_roots=resource_roots, allowed_origins=allowed_origins)
         return
 
-    header_text = header_text or md_path.stem
-    html = build_html(md_path, header_text, directives, theme=theme, page_size=page_size,
-                      properties=properties, byline=byline)
-
-    # 本地化 Mermaid JS 以支持 file:// 渲染
-    if 'class="mermaid"' in html:
-        html = _localize_mermaid_src(html)
-
-    html_path = Path(tempfile.gettempdir()) / f"{md_path.stem}.html"
-    html_path.write_text(html, encoding="utf-8")
-
     out = output_path_for(md_path, fmt, out_path)
-    _render_playwright_output(html_path, out, fmt, page_size=page_size, browser=browser,
-                              allow_diagram_errors=allow_diagram_errors)
-
-    size_kb = out.stat().st_size / 1024
-    print(f"✅ {out.name} ({size_kb:.0f} KB)")
+    with staged_output(out, md_path, fmt) as staged:
+        policy = ResourcePolicy(md_path, resource_roots, allowed_origins)
+        header_text = header_text or md_path.stem
+        html = build_html(md_path, header_text, directives, theme=theme, page_size=page_size,
+                          properties=properties, byline=byline, resource_policy=policy)
+        html_path = staged.parent / "document.html"
+        html_path.write_text(html, encoding="utf-8")
+        _render_playwright_output(html_path, staged, fmt, page_size=page_size, browser=browser,
+                                  allow_diagram_errors=allow_diagram_errors)
+    print(f"✅ {out.name} ({out.stat().st_size / 1024:.0f} KB)")
 
 
 if __name__ == "__main__":
@@ -2392,13 +2308,18 @@ if __name__ == "__main__":
             verify=args["verify"],
             verify_strict=args["verify_strict"],
             required_text=args["required_text"],
+            resource_roots=args["resource_roots"],
+            allowed_origins=args["allowed_origins"],
         )
     except MermaidRenderError as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(3)
-    except (LocalImageError, DeliveryError, RuntimeError, OSError) as e:
+    except (LocalImageError, ResourceError, DeliveryError, RuntimeError, OSError) as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
+    except KeyboardInterrupt:
+        print("❌ Render cancelled; target unchanged", file=sys.stderr)
+        sys.exit(130)
     if args["preview"]:
         out_resolved = output_path_for(
             positional[0], args["format"],

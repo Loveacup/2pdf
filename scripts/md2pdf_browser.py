@@ -13,7 +13,10 @@ import markdown
 from pathlib import Path
 from themes import load_theme, list_themes
 from image_assets import embed_local_images, local_image_check_js
-from pdf_delivery import staged_pdf
+from pdf_delivery import staged_pdf, run_render_process
+from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_html,
+                             browser_policy_js, browser_resource_check_js)
+from html import escape
 
 # All Obsidian callout types
 CALLOUT_STYLES = {
@@ -94,10 +97,8 @@ MERMAID_LOCAL = Path(__file__).parent / "mermaid.min.js"
 
 
 def get_mermaid_src():
-    """Return mermaid script src — local file if available, else CDN."""
-    if MERMAID_LOCAL.exists():
-        return f"file://{MERMAID_LOCAL}"
-    return "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
+    """Return the required offline pinned vendor."""
+    return vendor_uri(MERMAID_LOCAL)
 
 
 def wrap_sections(html):
@@ -403,8 +404,10 @@ def add_pdf_bookmarks(pdf_path, md_path):
     print(f"  \U0001F516 {len(headings)} bookmarks added")
 
 
-def build_html(md_path, header_text, directives=None, theme="blue"):
+def build_html(md_path, header_text, directives=None, theme="blue", resource_policy=None):
     md_path = Path(md_path)
+    policy = resource_policy or ResourcePolicy(md_path)
+    header_text = escape(str(header_text), quote=True)
     with open(md_path, "r", encoding="utf-8") as f:
         md_text = f.read()
 
@@ -416,7 +419,7 @@ def build_html(md_path, header_text, directives=None, theme="blue"):
     md_text = apply_directives(md_text, directives or [])
     md_text = preprocess_markdown(md_text)
     # Embed local images as base64 data URIs
-    md_text = embed_local_images(md_text, md_path.parent)
+    md_text = embed_local_images(md_text, md_path.parent, policy)
     body = markdown.markdown(
         md_text,
         extensions=[
@@ -432,6 +435,7 @@ def build_html(md_path, header_text, directives=None, theme="blue"):
         body,
         flags=re.DOTALL,
     )
+    body = policy.html(body)
     has_mermaid = 'class="mermaid"' in body
 
     # Wrap h2 sections for smart page breaking
@@ -524,7 +528,7 @@ def build_html(md_path, header_text, directives=None, theme="blue"):
 
     theme_obj = load_theme(theme)
 
-    return f"""<!DOCTYPE html>
+    return seal_html(f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -775,13 +779,13 @@ def build_html(md_path, header_text, directives=None, theme="blue"):
   /* ===== Theme overrides ===== */
   {theme_obj.css}
 </style>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/{theme_obj.hljs_theme}.min.css">
-<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+<link rel="stylesheet" href="{vendor_uri(Path(__file__).parent / 'hljs-styles' / (theme_obj.hljs_theme + '.min.css'))}">
+<script src="{vendor_uri(Path(__file__).parent / 'highlight.min.js')}"></script>
 <script>hljs.highlightAll();</script>
 {mermaid_script}
 </head>
 <body>
-{body}
+<!--DOCUMENT_BODY-->
 <script>
   // Content-adaptive sizing: tables + section density analysis
   document.addEventListener('DOMContentLoaded', function() {{
@@ -824,32 +828,35 @@ def build_html(md_path, header_text, directives=None, theme="blue"):
   }});
 </script>
 </body>
-</html>"""
+</html>""").replace("<!--DOCUMENT_BODY-->", body)
 
 
 def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="blue",
-              verify=False, verify_strict=False, required_text=()):
+              verify=False, verify_strict=False, required_text=(),
+              resource_roots=(), allowed_origins=()):
     target = Path(pdf_path) if pdf_path else Path(md_path).with_suffix(".pdf")
     with staged_pdf(target, md_path, verify, verify_strict, required_text) as staged:
-        _generate_pdf(md_path, staged, header_text, directives, theme)
+        _generate_pdf(md_path, staged, header_text, directives, theme,
+                      ResourcePolicy(md_path, resource_roots, allowed_origins))
     print(f"✅ {target.name} ({target.stat().st_size / 1024:.0f} KB)")
 
 
-def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="blue"):
+def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, theme="blue",
+                  resource_policy=None):
     """Convert markdown to PDF via Playwright Chromium headless."""
     md_path = Path(md_path)
     pdf_path = Path(pdf_path) if pdf_path else md_path.with_suffix(".pdf")
     header_text = header_text or md_path.stem
 
-    html = build_html(md_path, header_text, directives, theme=theme)
-    html_path = Path("/tmp") / f"{md_path.stem}.html"
+    html = build_html(md_path, header_text, directives, theme=theme, resource_policy=resource_policy)
+    html_path = pdf_path.parent / "document.html"
     html_path.write_text(html, encoding="utf-8")
 
     # Check if HTML contains mermaid diagrams
     has_mermaid = 'class="mermaid"' in html
 
     # Escape header_text for JS string (handle quotes and backslashes)
-    header_js = header_text.replace("\\", "\\\\").replace("'", "\\'")
+    header_js = escape(header_text, quote=True).replace("\\", "\\\\").replace("'", "\\'")
     pdf_path_js = str(pdf_path).replace("\\", "\\\\").replace("'", "\\'")
     html_path_js = str(html_path).replace("\\", "\\\\").replace("'", "\\'")
     pdf_name_js = pdf_path.name.replace("\\", "\\\\").replace("'", "\\'")
@@ -863,11 +870,12 @@ def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, the
         "const { chromium } = require('playwright');\n",
         "(async () => {\n",
         "  const browser = await chromium.launch();\n",
-        "  const page = await browser.newPage();\n",
+        browser_policy_js(html_path),
         "  await page.goto('file://", html_path_js, "', { waitUntil: 'networkidle' });\n",
         "  // Wait for JS pagination engine to run\n",
         "  await page.waitForTimeout(", str(wait_ms), ");\n",
         local_image_check_js(),
+        browser_resource_check_js(),
         "  await page.pdf({\n",
         "    path: '", pdf_path_js, "',\n",
         "    format: 'A4',\n",
@@ -887,13 +895,11 @@ def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, the
     ]
     js_script = "".join(js_script_parts)
 
-    js_path = Path("/tmp") / "gen_pdf.js"
+    js_path = pdf_path.parent / "gen_pdf.js"
     js_path.write_text(js_script, encoding="utf-8")
 
-    result = subprocess.run(
-        ["node", str(js_path)],
-        capture_output=True, text=True, timeout=120
-    )
+    from md2pdf_chrome import _node_env
+    result = run_render_process(["node", str(js_path)], text=True, env=_node_env())
 
     if result.returncode != 0:
         print(f"stderr: {result.stderr}", file=sys.stderr)
@@ -916,6 +922,8 @@ if __name__ == "__main__":
     verify = False
     verify_strict = False
     required_text = []
+    resource_roots = []
+    allowed_origins = []
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -942,13 +950,16 @@ if __name__ == "__main__":
             required_text.append(sys.argv[i + 1])
             verify = True
             i += 2
+        elif arg in ("--resource-root", "--allow-origin") and i + 1 < len(sys.argv):
+            (resource_roots if arg == "--resource-root" else allowed_origins).append(sys.argv[i + 1])
+            i += 2
         else:
             positional.append(sys.argv[i])
             i += 1
 
     if not positional:
         print(
-            "Usage: python md2pdf_browser.py <md_file> [pdf_file] [header_text] [--verify | --verify-strict] [--require-text TEXT] [--theme blue|dark|academic] [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]"
+            "Usage: python md2pdf_browser.py <md_file> [pdf_file] [header_text] [--resource-root DIR] [--allow-origin ORIGIN] [--verify | --verify-strict] [--require-text TEXT] [--theme blue|dark|academic] [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]"
         )
         sys.exit(1)
     md_to_pdf(
@@ -960,4 +971,6 @@ if __name__ == "__main__":
         verify=verify,
         verify_strict=verify_strict,
         required_text=required_text,
+        resource_roots=resource_roots,
+        allowed_origins=allowed_origins,
     )
