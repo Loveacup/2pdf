@@ -1,6 +1,8 @@
 ---
 name: 2pdf
 description: "Typeset Markdown/Obsidian notes to styled PDF/PNG/HTML/WeChat; perform PDF merge/split/rotate/watermark/encrypt, basic text/table extraction, simple OCR, create PDFs, and fill forms. Structured document-to-Markdown parsing is handled by sibling 2md. Triggers: md to pdf, markdown to pdf, 转 PDF, Obsidian 导出 PDF, 笔记转 PDF, export note to PDF, merge/split PDF, fill PDF form, PDF edit."
+version: 1.0.0
+author: AlexCai
 license: Proprietary. LICENSE.txt has complete terms
 ---
 

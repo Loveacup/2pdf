@@ -110,7 +110,7 @@ def test_launch_plan_auto_nothing_raises_needpandoc(monkeypatch):
 # --------------------------- preflight JSON 契约 --------------------------- #
 
 def test_preflight_json_schema_and_exit_matches_interpreter():
-    """blocker#1 双向: 当前解释器有 markdown → ok/exit0; 缺 → fail/exit1。"""
+    """blocker#1 双向: 当前解释器有 markdown → ok；缺 → fail。退出码 = 是否存在 fail 项。"""
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--preflight", "--json"],
         capture_output=True, text=True, cwd=str(REPO_ROOT / "scripts"), timeout=60,
@@ -120,9 +120,22 @@ def test_preflight_json_schema_and_exit_matches_interpreter():
     assert data["overall"] in ("ok", "degraded", "fail")
     md_check = next(c for c in data["checks"] if c["name"] == "interpreter:markdown")
     has_md = importlib.util.find_spec("markdown") is not None
-    if has_md:
-        assert md_check["status"] == "ok"
-        assert proc.returncode == 0
-    else:
-        assert md_check["status"] == "fail"
-        assert proc.returncode == 1
+    assert md_check["status"] == ("ok" if has_md else "fail")
+    fatal = any(c["status"] == "fail" for c in data["checks"])
+    assert proc.returncode == (1 if fatal else 0)
+    assert (data["overall"] == "fail") == fatal
+    assert all(c["hint"] == "" for c in data["checks"] if c["status"] == "ok")
+
+
+def test_preflight_fails_when_selected_engine_cannot_launch(monkeypatch, capsys):
+    """默认 playwright 缺 bundled Chromium 时 preflight 必须 FAIL，而 auto 有系统 Chrome 时仍可用。"""
+    monkeypatch.setattr(m, "_bundled_launchable", lambda: False)
+    monkeypatch.setattr(m, "_find_system_chrome", lambda: "/fake/chrome")
+    assert m.run_preflight(as_json=True, browser="playwright") == 1
+    report = json.loads(capsys.readouterr().out)
+    engine = next(c for c in report["checks"] if c["name"] == "engine:playwright")
+    assert engine["status"] == "fail" and report["overall"] == "fail"
+    assert m.run_preflight(as_json=True, browser="auto") == 0
+    capsys.readouterr()
+    monkeypatch.setattr(m, "_find_system_chrome", lambda: None)
+    assert m.run_preflight(as_json=True, browser="chrome") == 1

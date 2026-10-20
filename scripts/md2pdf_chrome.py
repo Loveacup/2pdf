@@ -1975,12 +1975,16 @@ def run_setup():
     return 0 if not failures else 1
 
 
-def run_preflight(md_path=None, want_format="pdf", as_json=False):
-    """渲染前依赖/环境健康检查。退出码：0 可用(或仅 WARN)，1 致命 FAIL，2 指定 md 不存在。"""
+def run_preflight(md_path=None, want_format="pdf", as_json=False, browser="playwright"):
+    """渲染前依赖/环境健康检查。退出码：0 可用(或仅 WARN)，1 致命 FAIL，2 指定 md 不存在。
+
+    组件缺失本身只是 WARN；但本次所选格式与 --browser 引擎链整体不可用时为 FAIL，
+    避免 preflight 报"可用"而实际渲染必然失败。ok 项不带 hint。
+    """
     checks = []
 
     def chk(name, status, hint=""):
-        checks.append({"name": name, "status": status, "hint": hint})
+        checks.append({"name": name, "status": status, "hint": "" if status == "ok" else hint})
 
     def okfail(cond):
         return "ok" if cond else "fail"
@@ -1993,20 +1997,34 @@ def run_preflight(md_path=None, want_format="pdf", as_json=False):
         f"当前解释器 {sys.executable} 缺 markdown；pip install markdown 或换装齐依赖的 venv")
     chk("pypdf", okwarn(importlib.util.find_spec("pypdf") is not None),
         "pip install pypdf（缺则跳过去空白页/书签/metadata）")
-    chk("css_inline", okwarn(importlib.util.find_spec("css_inline") is not None),
+    has_css_inline = importlib.util.find_spec("css_inline") is not None
+    chk("css_inline", ("ok" if has_css_inline else ("fail" if want_format == "wechat" else "warn")),
         "pip install css_inline（--format wechat 需要）")
-    chk("playwright:bundled", okwarn(_bundled_launchable()),
-        "npx playwright install chromium（缺则 auto 降级系统 chrome）")
-    chk("system-chrome", okwarn(_find_system_chrome() is not None),
+    bundled_ok = _bundled_launchable()
+    chrome_ok = _find_system_chrome() is not None
+    pandoc_ok = shutil.which("pandoc") is not None
+    chk("playwright:bundled", okwarn(bundled_ok),
+        "npx playwright install chromium（或 python3 scripts/maintenance.py init）")
+    chk("system-chrome", okwarn(chrome_ok),
         "安装 Google Chrome（--browser chrome / auto 第二路 / pandoc 救生艇需要）")
-    chk("pandoc", okwarn(shutil.which("pandoc") is not None),
+    chk("pandoc", okwarn(pandoc_ok),
         f"{_pandoc_install_hint()}（pandoc 救生艇需要）")
+    if browser == "playwright":
+        engine_ok = bundled_ok
+        engine_hint = "默认 --browser playwright 需要 bundled Chromium：npx playwright install chromium；或改用 --browser auto/chrome"
+    elif browser == "chrome":
+        engine_ok = chrome_ok
+        engine_hint = "--browser chrome 需要系统 Chrome/Chromium"
+    else:
+        engine_ok = bundled_ok or chrome_ok  # pandoc 救生艇同样依赖系统 Chrome 打印
+        engine_hint = "--browser auto 无可启动的 Chromium（bundled 与系统 Chrome 均缺）"
+    chk(f"engine:{browser}", okfail(engine_ok), engine_hint)
     chk("mermaid-vendor", okwarn(MERMAID_LOCAL.exists()),
         f"mermaid {MERMAID_PIN} 本地副本缺失（--setup 下载；否则渲染时联网取 pinned CDN）")
     chk("hljs-vendor", okwarn(HLJS_LOCAL.exists()),
         "highlight.js 本地副本缺失（--setup 下载；否则渲染时走 CDN，离线降级）")
     chk("venv:persistent", okwarn(_venv_python().exists()),
-        f"持久 venv 未建（{VENV_DIR}）；跑 --setup 一键引导，或渲染命令将自动引导")
+        f"持久 venv 未建（{VENV_DIR}）；跑 python3 scripts/maintenance.py init")
 
     code = 0
     if md_path is not None:
@@ -2333,6 +2351,7 @@ if __name__ == "__main__":
             md_path=positional[0] if positional else None,
             want_format=args["format"],
             as_json=args["as_json"],
+            browser=args["browser"],
         ))
 
     if not positional:
