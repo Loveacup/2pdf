@@ -17,7 +17,10 @@ def embed_local_images(md_text, md_dir, policy=None):
         try:
             uri = policy.resource(src)
         except ValueError as exc:
-            raise LocalImageError(f"Local image {src!r}: {exc}") from exc
+            hint = ("\nCheck the image path; place the file beneath the source directory, "
+                    "or authorize its directory with --resource-root DIR."
+                    if isinstance(exc.__cause__, FileNotFoundError) else "")
+            raise LocalImageError(f"Local image {src!r}: {exc}{hint}") from exc
         # Preserve the source reference through embedding so decode errors identify it.
         return (f'<img alt="{escape(alt, quote=True)}" src="{uri}" '
                 f'data-jz-local-source="{escape(src, quote=True)}">')

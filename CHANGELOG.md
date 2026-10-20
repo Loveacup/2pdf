@@ -4,6 +4,16 @@
 
 ## 2.0.0 — 2026-10-20
 
+### 终验修复
+
+- **Improved（CR03, CR09）**：修复 `.SFNS-Bold` 中 `·` 的缺字误报。隐藏系统 UI 字体的名义 cmap 可能缺少标点；CoreText 实际排版会使用内部级联字体。仅对 Chromium 记录的 `.SF` 字体补查排版字形，并拒绝零字形与 LastResort。
+- **Improved（CR04, CR06）**：修复深色主题 Callout 正文与代码的对比度。Callout 的固定浅色背景配深色正文，主题代码背景与语法颜色保持至少 4.5:1。图片宽度限制覆盖所有媒体，公众号保留内联限制；宽图不再撑大 PNG/HTML 页面。
+- **Improved（CR04, CR14）**：KaTeX 解析失败只保留原公式错误，不再追加空 TeX 的 DOM 错误。缺失本地图片增加 1 行修复提示，说明路径、源目录与 `--resource-root`。
+- **Preserved（CR03–CR09, CR13, CR14）**：真实缺字、公式错误与缺图仍拒绝交付，不覆盖已有目标。默认离线、资源授权、源文件只读、公式对账及显式图表豁免保持。
+- **Confirmed（CR04, CR06）**：Callout 继承错误、`gruvbox-dark` 黄色代码背景及非打印输出宽图溢出，在 `a75fd4c` 中已存在。字体误报与公式重复错误来自本版新增质量门。
+- **Confirmed（CR03, CR04, CR06, CR09, CR14）**：完整套件 **289 passed in 203.51s**。18 个主题的实际浏览器对比度测试通过，覆盖全部 Callout 类型与语法颜色。真实缺字仍拒绝交付，错误公式只报告 1 项结构化错误。
+- **Confirmed（CR03–CR09, CR14）**：14 份真实文档以默认参数加 `--verify` 全部成功，共 69 页。技术稿与报告的 14 项尺寸/格式复现全部成功；报告 PNG 从 1000 px 恢复为 A4 的 794 px、移动版的 430 px。已查看全部页的接触表，并逐页查看深色代码、Callout、宽图与 `·` 标题。
+
 **Breaking**：四种输出默认离线、只授权源文件真实父目录；远程资源须 `--allow-origin`，根外资源须 `--resource-root`；文档脚本不执行；`--fallback pandoc` 拒绝。迁移说明见 `SKILL.md` Pitfalls 与 `references/optimization-roadmap.md`。
 
 ### 真实文档回归修复

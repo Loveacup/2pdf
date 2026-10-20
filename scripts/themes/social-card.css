@@ -103,3 +103,5 @@ pre code { font-size: 12.5px; }
 
 .mermaid { margin: 16px auto; text-align: center; }
 img { max-width: 100%; height: auto; border-radius: 10px; }
+
+pre .hljs-comment, pre .hljs-quote { color: #a1a7b3; }

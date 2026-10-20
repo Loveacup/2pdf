@@ -206,7 +206,11 @@ def math_check_js():
     const nodes = Array.from(document.querySelectorAll('.jz-math'));
     const indices = new Set(nodes.map(node => node.dataset.mathIndex));
     const rendered = new Set();
+    // A KaTeX parse failure already has its source and ordinal. Its empty DOM
+    // is expected, not a second independent delivery failure.
+    const failed = new Set(st.errors.map(error => String(error.index)));
     for (const node of nodes) {
+      if (failed.has(node.dataset.mathIndex)) continue;
       const content = node.querySelector('.katex-html');
       if (!content || !node.querySelector('annotation[encoding="application/x-tex"]')) {
         st.errors.push({index:Number(node.dataset.mathIndex), message:'Rendered formula missing from final DOM', head:node.textContent.slice(0,160)});

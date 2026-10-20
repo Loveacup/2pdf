@@ -23,3 +23,5 @@ pre code, pre code.hljs { color: #d4d4d4 !important; }
 code { background: #2a2a2a; color: #f48771; }
 hr { border-top-color: #444; }
 .doc-meta { color: #888; border-bottom-color: #333; }
+
+pre .hljs-comment, pre .hljs-quote { color: #a1a7b3; }

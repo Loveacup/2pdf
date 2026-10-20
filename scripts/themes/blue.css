@@ -4,3 +4,9 @@ name = blue
 description = 2pdf default blue theme (styles remain in renderer base CSS for backwards compatibility)
 hljs_theme = atom-one-dark
 */
+
+/* Match the dark syntax palette; comments need a readable neutral. */
+:root { --pdf-pre-bg: #282c34; }
+pre .hljs-comment, pre .hljs-quote { color: #a1a7b3; }
+pre .hljs-deletion, pre .hljs-name, pre .hljs-section,
+pre .hljs-selector-tag, pre .hljs-subst { color: #ed8990; }

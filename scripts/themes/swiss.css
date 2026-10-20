@@ -5,6 +5,15 @@ description = Swiss International Typographic Style: bold black sans headings, t
 hljs_theme = github
 */
 
+:root { --pdf-pre-text: #1a1a1a; }
+pre .hljs-built_in, pre .hljs-symbol { color: #a34706; }
+pre .hljs-doctag, pre .hljs-keyword, pre .hljs-meta .hljs-keyword,
+pre .hljs-template-tag, pre .hljs-template-variable, pre .hljs-type,
+pre .hljs-variable.language_ { color: #be2938; }
+pre .hljs-name, pre .hljs-quote, pre .hljs-selector-pseudo,
+pre .hljs-selector-tag, pre .hljs-addition { color: #1b7430; }
+pre .hljs-code, pre .hljs-comment, pre .hljs-formula { color: #62666d; }
+
 /* swiss — 仿 deck-swiss-international：瑞士国际主义风格，
    无衬线粗黑标题、网格化留白、红色 (#e30613) 强调，适合技术方案 / Deck */
 
@@ -80,7 +89,7 @@ li ul, li ol { margin: 3px 0; }
 
 code {
   font-family: "SF Mono", "Fira Code", "Menlo", monospace;
-  background: #f2f2f2; color: #e30613;
+  background: #f2f2f2; color: #bd0610;
   padding: 1px 5px; border-radius: 0; font-size: 12.5px;
 }
 pre {

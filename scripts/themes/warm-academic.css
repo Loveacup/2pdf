@@ -5,6 +5,16 @@ description = Warm beige academic style: cream background, dark brown text, seri
 hljs_theme = atom-one-light
 */
 
+/* Keep the light code panel and every syntax category readable. */
+:root { --pdf-pre-text: #3e2723; }
+pre .hljs-comment, pre .hljs-quote { color: #62666d; }
+pre .hljs-deletion, pre .hljs-name, pre .hljs-section, pre .hljs-selector-tag, pre .hljs-subst { color: #b33b30; }
+pre .hljs-literal { color: #006b99; }
+pre .hljs-addition, pre .hljs-attribute, pre .hljs-meta .hljs-string, pre .hljs-regexp, pre .hljs-string { color: #347334; }
+pre .hljs-attr, pre .hljs-number, pre .hljs-selector-attr, pre .hljs-selector-class, pre .hljs-selector-pseudo, pre .hljs-template-variable, pre .hljs-type, pre .hljs-variable { color: #805800; }
+pre .hljs-bullet, pre .hljs-link, pre .hljs-meta, pre .hljs-selector-id, pre .hljs-symbol, pre .hljs-title { color: #2f5fc0; }
+pre .hljs-built_in, pre .hljs-class .hljs-title, pre .hljs-title.class_ { color: #805800; }
+
 body {
   font-family: "Palatino Linotype", "Book Antiqua", Palatino,
                "Noto Serif SC", "Source Han Serif CN", "PingFang SC", serif;
@@ -22,4 +32,4 @@ th { background: #8d6e63; color: #fefaf2; border-color: #8d6e63; font-size: 10.5
 a { color: #8d6e63; }
 blockquote { border-left: 3px solid #bcaaa4; background: #fbf5ec; font-style: italic; color: #6d4c41; }
 pre { background: #f8f0e3; color: #3e2723; border: 1px solid #d7ccc8; }
-code { background: #f3e8db; color: #8d6e63; }
+code { background: #f3e8db; color: #75564b; }

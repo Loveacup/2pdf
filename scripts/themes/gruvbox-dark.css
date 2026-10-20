@@ -17,10 +17,15 @@
   --pdf-table-border: #3c3836;
   --pdf-table-stripe: #3c3836;
   --pdf-code-bg: #3c3836;
-  --pdf-code-text: #fb4934;
-  --pdf-pre-bg: #fabd2f;
-  --pdf-pre-text: #282828;
+  --pdf-code-text: #ff8273;
+  --pdf-pre-bg: #282828;
+  --pdf-pre-text: #ebdbb2;
   --pdf-meta: #b8bb26;
   --pdf-mermaid-bg: #282828;
   --pdf-mermaid-border: #3c3836;
 }
+
+pre .hljs-comment, pre .hljs-quote { color: #b0b5bf; }
+pre .hljs-keyword, pre .hljs-doctag, pre .hljs-formula { color: #d59ae5; }
+pre .hljs-deletion, pre .hljs-name, pre .hljs-section,
+pre .hljs-selector-tag, pre .hljs-subst { color: #ed8990; }

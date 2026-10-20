@@ -50,9 +50,9 @@ CALLOUT_STYLES = {
     "success": {"emoji": "&#x2705;", "color": "#1e8449", "bg": "#d5f5e3"},
     "check": {"emoji": "&#x2705;", "color": "#1e8449", "bg": "#d5f5e3"},
     "done": {"emoji": "&#x2705;", "color": "#1e8449", "bg": "#d5f5e3"},
-    "question": {"emoji": "&#x2753;", "color": "#b7950b", "bg": "#fef9e7"},
-    "help": {"emoji": "&#x2753;", "color": "#b7950b", "bg": "#fef9e7"},
-    "faq": {"emoji": "&#x2753;", "color": "#b7950b", "bg": "#fef9e7"},
+    "question": {"emoji": "&#x2753;", "color": "#856b08", "bg": "#fef9e7"},
+    "help": {"emoji": "&#x2753;", "color": "#856b08", "bg": "#fef9e7"},
+    "faq": {"emoji": "&#x2753;", "color": "#856b08", "bg": "#fef9e7"},
     "warning": {"emoji": "&#x26A0;&#xFE0F;", "color": "#b45309", "bg": "#fef3c7"},
     "caution": {"emoji": "&#x26A0;&#xFE0F;", "color": "#b45309", "bg": "#fef3c7"},
     "attention": {"emoji": "&#x26A0;&#xFE0F;", "color": "#b45309", "bg": "#fef3c7"},
@@ -68,8 +68,8 @@ CALLOUT_STYLES = {
     # Custom callout types
     "decision": {"emoji": "&#x2705;", "color": "#1e8449", "bg": "#d5f5e3"},
     "insight": {"emoji": "&#x1F4A1;", "color": "#9c27b0", "bg": "#f3e5f5"},
-    "meta": {"emoji": "&#x2139;&#xFE0F;", "color": "#607d8b", "bg": "#eceff1"},
-    "multi-column": {"emoji": "", "color": "#666", "bg": "transparent"},
+    "meta": {"emoji": "&#x2139;&#xFE0F;", "color": "#455a64", "bg": "#eceff1"},
+    "multi-column": {"emoji": "", "color": "#666", "bg": "#f8f9fa"},
 }
 
 # Friendly display names
@@ -943,7 +943,8 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
   .text-xs table {{ font-size: 10px; }}
 
   /* ===== Callouts ===== */
-  .callout {{ font-size: 12.5px; }}
+  .callout {{ font-size: 12.5px; color: #2c3e50; }}
+  .callout strong, .callout em, .callout a {{ color: #2c3e50; }}
   .callout p {{ margin: 4px 0; }}
   .callout table {{ font-size: 10.5px; }}
   .callout li {{ font-size: 12px; }}
@@ -1009,10 +1010,13 @@ def build_html(md_path, header_text, directives=None, theme="auto", page_size="A
 
   /* ===== Mobile font-size adjustment (430×932) ===== */
   {mobile_adjust_css}
+  /* Images fit the content column in screen exports as well as print.
+     Keep this outside @media so WeChat's CSS inliner retains the constraint. */
+  img {{ max-width: 100%; height: auto; object-fit: contain; }}
   /* Semantic print rules apply after themes; no position-based page simulation. */
   @media print {{
     pre {{ overflow-wrap: anywhere; white-space: pre-wrap; }}
-    img {{ max-width: 100%; object-fit: contain; break-inside: avoid; }}
+    img {{ break-inside: avoid; }}
     .doc-section, .doc-subsection {{ break-inside: auto; }}
   }}
 </style>

@@ -5,6 +5,16 @@ description = Mobile-first PDF (430×932px): cream background, bronze gold accen
 hljs_theme = atom-one-light
 */
 
+/* Keep the light code panel and every syntax category readable. */
+:root { --pdf-pre-text: #1b1a17; }
+pre .hljs-comment, pre .hljs-quote { color: #62666d; }
+pre .hljs-deletion, pre .hljs-name, pre .hljs-section, pre .hljs-selector-tag, pre .hljs-subst { color: #b33b30; }
+pre .hljs-literal { color: #006b99; }
+pre .hljs-addition, pre .hljs-attribute, pre .hljs-meta .hljs-string, pre .hljs-regexp, pre .hljs-string { color: #347334; }
+pre .hljs-attr, pre .hljs-number, pre .hljs-selector-attr, pre .hljs-selector-class, pre .hljs-selector-pseudo, pre .hljs-template-variable, pre .hljs-type, pre .hljs-variable { color: #805800; }
+pre .hljs-bullet, pre .hljs-link, pre .hljs-meta, pre .hljs-selector-id, pre .hljs-symbol, pre .hljs-title { color: #2f5fc0; }
+pre .hljs-built_in, pre .hljs-class .hljs-title, pre .hljs-title.class_ { color: #805800; }
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
                "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei",
@@ -71,7 +81,7 @@ li ul, li ol { font-size: 15px; margin: 2px 0; }
 
 code {
   font-family: "SF Mono", "Fira Code", "Menlo", monospace;
-  background: #f0ebe0; color: #b47a32;
+  background: #f0ebe0; color: #80551f;
   padding: 1px 4px; border-radius: 3px; font-size: 13px;
 }
 pre {

@@ -6,6 +6,10 @@ import sys
 import unicodedata
 
 
+class _CFRange(ctypes.Structure):
+    _fields_ = [('location', ctypes.c_long), ('length', ctypes.c_long)]
+
+
 def font_check_js():
     return r"""
   await page.evaluate(async () => { await document.fonts.ready; });
@@ -84,14 +88,15 @@ def font_check_js():
 
 
 def check_font_report(stdout):
-    """Keep diagnostics machine-readable; CoreText checks actual font cmaps on macOS."""
+    """Keep diagnostics machine-readable; check actual macOS faces and UI shaping."""
     match = re.search(r'FONT_REPORT:(.*)', stdout)
     if not match:
         raise RuntimeError('Chromium did not return actual font usage evidence')
     report = json.loads(match[1])
     runs = report.pop('glyphRuns', [])
     if sys.platform == 'darwin':
-        report['nativeCoverage'] = 'CoreText non-ASCII glyph IDs for actual per-node fonts; ASCII uses Chromium raster guard'
+        report['nativeCoverage'] = ('CoreText non-ASCII glyph IDs for actual per-node fonts, '
+                                    'with shaped UI cascade; ASCII uses Chromium raster guard')
         report['missing'].extend(_coretext_missing(runs))
     else:
         report['nativeCoverage'] = 'unverified; CDP/notdef diagnostics do not replace platform visual acceptance'
@@ -115,6 +120,73 @@ def _coretext_missing(runs):
     ct.CTFontGetGlyphsForCharacters.argtypes = [ptr, ctypes.POINTER(ctypes.c_uint16),
                                                ctypes.POINTER(ctypes.c_uint16), ctypes.c_long]
     ct.CTFontGetGlyphsForCharacters.restype = ctypes.c_bool
+    cf.CFDictionaryCreate.argtypes = [ptr, ctypes.POINTER(ptr), ctypes.POINTER(ptr),
+                                     ctypes.c_long, ptr, ptr]
+    cf.CFDictionaryCreate.restype = ptr
+    cf.CFAttributedStringCreate.argtypes = [ptr, ptr, ptr]
+    cf.CFAttributedStringCreate.restype = ptr
+    cf.CFArrayGetCount.argtypes = [ptr]
+    cf.CFArrayGetCount.restype = ctypes.c_long
+    cf.CFArrayGetValueAtIndex.argtypes = [ptr, ctypes.c_long]
+    cf.CFArrayGetValueAtIndex.restype = ptr
+    cf.CFDictionaryGetValue.argtypes = [ptr, ptr]
+    cf.CFDictionaryGetValue.restype = ptr
+    cf.CFStringGetCString.argtypes = [ptr, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+    cf.CFStringGetCString.restype = ctypes.c_bool
+    ct.CTLineCreateWithAttributedString.argtypes = [ptr]
+    ct.CTLineCreateWithAttributedString.restype = ptr
+    ct.CTLineGetGlyphRuns.argtypes = [ptr]
+    ct.CTLineGetGlyphRuns.restype = ptr
+    ct.CTRunGetAttributes.argtypes = [ptr]
+    ct.CTRunGetAttributes.restype = ptr
+    ct.CTRunGetGlyphCount.argtypes = [ptr]
+    ct.CTRunGetGlyphCount.restype = ctypes.c_long
+    ct.CTRunGetGlyphs.argtypes = [ptr, _CFRange, ctypes.POINTER(ctypes.c_uint16)]
+    ct.CTFontCopyPostScriptName.argtypes = [ptr]
+    ct.CTFontCopyPostScriptName.restype = ptr
+    font_attribute = ptr.in_dll(ct, 'kCTFontAttributeName')
+
+    def shaped_ui_coverage(font, char):
+        # A hidden system UI face is a logical font: e.g. .SFNS-Bold has no
+        # nominal U+00B7 cmap entry, but CTLine emits a real glyph from its
+        # private .CJKSymbolsFallbackSC-Bold implementation face. CDP reports
+        # that rendered glyph under .SFNS-Bold, not the internal cascade face.
+        # Only actual CDP-reported UI fonts enter this path; ordinary installed
+        # faces must still cover the character themselves. Never accept the
+        # nonzero glyph IDs provided by CoreText's LastResort tofu font.
+        string = cf.CFStringCreateWithCString(None, char.encode(), 0x08000100)
+        attributes = cf.CFDictionaryCreate(None, (ptr * 1)(font_attribute),
+                                           (ptr * 1)(font), 1, None, None)
+        attributed = cf.CFAttributedStringCreate(None, string, attributes)
+        line = ct.CTLineCreateWithAttributedString(attributed)
+        try:
+            shaped_runs = ct.CTLineGetGlyphRuns(line)
+            if not cf.CFArrayGetCount(shaped_runs):
+                return False
+            for index in range(cf.CFArrayGetCount(shaped_runs)):
+                run = cf.CFArrayGetValueAtIndex(shaped_runs, index)
+                count = ct.CTRunGetGlyphCount(run)
+                glyphs = (ctypes.c_uint16 * count)()
+                ct.CTRunGetGlyphs(run, _CFRange(0, count), glyphs)
+                if not count or not all(glyphs):
+                    return False
+                run_font = cf.CFDictionaryGetValue(ct.CTRunGetAttributes(run), font_attribute)
+                name = ct.CTFontCopyPostScriptName(run_font)
+                try:
+                    buffer = ctypes.create_string_buffer(256)
+                    if not cf.CFStringGetCString(name, buffer, len(buffer), 0x08000100):
+                        return False
+                    if b'lastresort' in buffer.value.lower():
+                        return False
+                finally:
+                    cf.CFRelease(name)
+            return True
+        finally:
+            cf.CFRelease(line)
+            cf.CFRelease(attributed)
+            cf.CFRelease(attributes)
+            cf.CFRelease(string)
+
     fonts, coverage, missing = {}, {}, {}
     try:
         for run in runs:
@@ -146,6 +218,8 @@ def _coretext_missing(runs):
                         glyphs = (ctypes.c_uint16 * count)()
                         ct.CTFontGetGlyphsForCharacters(fonts[name], characters, glyphs, count)
                         coverage[key] = any(glyphs)
+                        if not coverage[key] and name.startswith('.SF'):
+                            coverage[key] = shaped_ui_coverage(fonts[name], char)
                     if coverage[key]:
                         found = True
                         break

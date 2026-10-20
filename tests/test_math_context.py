@@ -139,3 +139,29 @@ document.addEventListener('DOMContentLoaded', function() {
     with pytest.raises(md2pdf_chrome.MathRenderError, match='Formula count changed in final DOM'):
         md2pdf_chrome.md_to_output(source, target, fmt='html')
     assert not target.exists()
+
+
+@pytest.mark.integration
+def test_bad_formula_reports_one_structured_error(tmp_path, monkeypatch):
+    import md2pdf_chrome
+
+    source = tmp_path / 'bad-formula.md'
+    tex = r'\notarealcommand{a}'
+    source.write_text(f'${tex}$\n')
+    target = tmp_path / 'bad-formula.html'
+    errors = []
+    original_formatter = md2pdf_chrome.format_math_errors
+
+    def recording_formatter(stderr):
+        record = next(line.partition(':')[2] for line in stderr.splitlines()
+                      if line.startswith('MATH_ERRORS:'))
+        errors.extend(json.loads(record))
+        return original_formatter(stderr)
+
+    monkeypatch.setattr(md2pdf_chrome, 'format_math_errors', recording_formatter)
+    with pytest.raises(md2pdf_chrome.MathRenderError):
+        md2pdf_chrome.md_to_output(source, target, fmt='html')
+    assert len(errors) == 1
+    assert errors[0]['index'] == 1
+    assert errors[0]['head'] == tex
+    assert not target.exists()
