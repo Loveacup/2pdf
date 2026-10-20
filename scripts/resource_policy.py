@@ -1,17 +1,30 @@
 """Document resources are authorized, recursively frozen, and never fetched by Chromium."""
 import base64
+import json
 import mimetypes
 import re
 import secrets
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote, unquote_to_bytes, urljoin, urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.parse import unquote_to_bytes, urldefrag, urljoin, urlsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener, url2pathname
+
+
+# Only CSS-bearing attributes interpret url(); alt/title/ARIA/data text is literal.
+CSS_ATTRIBUTES = frozenset({
+    'style', 'clip-path', 'color-profile', 'cursor', 'fill', 'filter', 'mask',
+    'marker', 'marker-start', 'marker-mid', 'marker-end', 'stroke',
+})
 
 
 class ResourceError(ValueError):
     """A document resource violates its invocation's access policy."""
+
+
+def file_url_path(url):
+    """Decode a file URL using the host platform's drive/escape conventions."""
+    return url2pathname(urlsplit(url).path)
 
 
 def origin(url):
@@ -42,6 +55,9 @@ class ResourcePolicy:
 
     def authorize(self, reference, base=None):
         reference = reference.strip()
+        # urljoin treats an explicit Windows drive as a URL scheme.
+        if re.match(r'^[a-zA-Z]:[\\/]', reference):
+            reference = Path(reference).as_uri()
         url = urljoin(base or self.base, reference)
         parsed = urlsplit(url)
         if parsed.scheme in ('http', 'https'):
@@ -51,7 +67,7 @@ class ResourcePolicy:
         elif parsed.scheme == 'file':
             if parsed.netloc not in ('', 'localhost'):
                 raise ResourceError(f'Nonlocal file resource blocked: {reference!r}')
-            path = Path(unquote(parsed.path)).resolve()
+            path = Path(file_url_path(url)).resolve()
             if not any(path.is_relative_to(root) for root in self.roots):
                 raise ResourceError(f'Resource {reference!r} escapes authorized roots; use --resource-root DIR to grant access.')
         elif parsed.scheme != 'data':
@@ -61,9 +77,10 @@ class ResourcePolicy:
     def resource(self, reference, base=None):
         if reference.startswith('#'):
             return reference
-        url = self.authorize(reference, base)
+        url, fragment = urldefrag(self.authorize(reference, base))
+        suffix = '#' + fragment if fragment else ''
         if url in self.cache:
-            return self.cache[url]
+            return self.cache[url] + suffix
         if url in self.active:
             raise ResourceError(f'Cyclic resource reference: {reference!r}')
         self.active.add(url)
@@ -75,7 +92,7 @@ class ResourcePolicy:
                 data = base64.b64decode(payload) if ';base64' in header.lower() else unquote_to_bytes(payload)
                 resource_base = base or self.base
             elif parsed.scheme == 'file':
-                path = Path(unquote(parsed.path)).resolve()
+                path = Path(file_url_path(url)).resolve()
                 try:
                     data = path.read_bytes()
                 except OSError as exc:
@@ -110,9 +127,16 @@ class ResourcePolicy:
                 data = self.html(data.decode('utf-8-sig'), resource_base).encode()
             uri = f'data:{mime};base64,{base64.b64encode(data).decode()}'
             self.cache[url] = uri
-            return uri
+            return uri + suffix
         finally:
             self.active.remove(url)
+
+    def svg_use(self, reference, base=None):
+        if reference.startswith('#'):
+            return reference
+        self.authorize(reference, base)
+        raise ResourceError(f'External SVG <use> reference {reference!r} cannot be rendered safely; '
+                            'inline its symbol in the same SVG and use href="#id".')
 
     def css(self, text, base=None):
         # Decode CSS escapes before identifying URLs; Chromium's CSP remains a second boundary.
@@ -147,10 +171,12 @@ class ResourcePolicy:
                 name = key.rsplit('}', 1)[-1].lower()
                 if name.startswith('on'):
                     del element.attrib[key]
-                elif name == 'style' or re.search(r'url\s*\(', value, re.I):
+                elif name in CSS_ATTRIBUTES:
                     element.attrib[key] = self.css(value, base)
                 elif name in ('href', 'src'):
-                    element.attrib[key] = self.resource(value, base)
+                    element.attrib[key] = (self.svg_use(value, base)
+                                           if element.tag.rsplit('}', 1)[-1].lower() == 'use'
+                                           else self.resource(value, base))
             if element.tag.rsplit('}', 1)[-1] == 'style' and element.text:
                 element.text = self.css(element.text, base)
         return ET.tostring(root, encoding='unicode')
@@ -181,12 +207,13 @@ class _Document(HTMLParser):
             return
         clean = []
         for key, value in attrs.items():
-            if key.startswith('on') or key in ('nonce', 'integrity', 'crossorigin', 'ping', 'formaction', 'action', 'data-jz-local-source'):
+            if key.startswith('on') or key in ('nonce', 'integrity', 'crossorigin', 'ping', 'formaction', 'action',
+                                              'data-jz-local-source', 'data-jz-local-srcset'):
                 continue
             if value is None:
                 clean.append(key)
                 continue
-            if key == 'style' or re.search(r'url\s*\(', value, re.I):
+            if key in CSS_ATTRIBUTES:
                 value = self.policy.css(value, self.base)
             elif key == 'srcdoc':
                 value = self.policy.html(value, self.base)
@@ -194,14 +221,18 @@ class _Document(HTMLParser):
                 # Freeze each candidate. Data URIs already work in src and avoid ambiguous comma parsing.
                 if value.lstrip().startswith('data:'):
                     raise ResourceError('Use src rather than a data-URI srcset')
-                candidates = []
+                candidates, sources = [], []
                 for candidate in value.split(','):
                     parts = candidate.strip().split()
                     if parts:
-                        candidates.append(' '.join([self.policy.resource(parts[0], self.base)] + parts[1:]))
+                        uri = self.policy.resource(parts[0], self.base)
+                        candidates.append(' '.join([uri] + parts[1:]))
+                        sources.append({'source': parts[0], 'uri': uri})
                 value = ', '.join(candidates)
+                clean.append('data-jz-local-srcset="' + escape(json.dumps(sources), quote=True) + '"')
             elif key in ('src', 'poster', 'background') or (key in ('href', 'xlink:href') and tag not in ('a', 'area')):
-                value = self.policy.resource(value, self.base)
+                value = (self.policy.svg_use(value, self.base) if tag == 'use'
+                         else self.policy.resource(value, self.base))
                 if tag == 'img':
                     source = attrs.get('data-jz-local-source', attrs.get(key, ''))
                     clean.append('data-jz-local-source="' + escape(source, quote=True) + '"')

@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+### 复核修复
+
+- **Improved（CR04, CR09, CR11）**：授权与读取统一按平台解码 file URL，保留 Windows 盘符与转义字符；资源冻结按无 fragment URL 缓存并回填原 fragment，SVG view 不再丢失。外部 SVG `<use>` 因 Chromium data URI 限制明确报源引用并拒绝，要求将 symbol 内联后使用同文档 `#id`，不再成功交付空图。
+- **Improved（CR04, CR05, CR09）**：`srcset`/`picture` 的全部候选与普通 `src` 共用浏览器 decode 质量门，包括未选候选，缺失/损坏均定位原始源名；CSS `url()` 只在 style 与已识别 SVG presentation 属性改写，alt/title/ARIA/data 文本保持字面。
+- **Improved（CR04, CR06, CR11）**：legacy 与主渲染器共用 fence-first 保护，围栏/行内代码中的图片及 Obsidian 语法不触发预处理；legacy 暂存导航使用 `Path.resolve().as_uri()` 并 JSON 序列化，输出目录中的 `#`、`?`、`%`、空格、引号与 Unicode 不再破坏 URL。
+- **Preserved（CR01–CR14）**：不升级依赖、不改 parser/公式/Mermaid/字体与分页策略；默认离线、授权根与跳转检查、全部页保留、源文件只读及原子交付不变，未新增必需参数。
+- **Confirmed（CR04, CR09, CR11）**：复跑原复核样本：SVG view HTML/PDF exit 0，HTML 像素采样恢复蓝色 `[0,0,255,255]`；外部 `<use>`、损坏 srcset exit 1 且无新产物并指出源名；legacy 代码示例与 `#` 目录 PDF 通过 `--verify --require-text LEGACY_SENTINEL`，alt 文本原样成功。Windows 使用 nturl2path/PureWindowsPath 在 macOS 验证盘符绝对路径与授权根归属，未声称 Windows 实机验收。命令、结果与探针：`/var/folders/47/8_kft2fx0w3bqlcxcppz_3pm0000gn/T/2pdf-review-fixes-qhy1d9be/`。
+  完整套件 **220 passed in 148.11s**，含本次 20 项行为回归；各缺陷的回归族均先出现对应失败再修复。候选集覆盖 srcset-only、picture 与未选密度候选，路径覆盖 `#` 与 `? % ' 中`；原复现首次新证据目录尚未建输出子目录导致的准备失败亦保留在 results.json，建目录后原命令成功。
+
 ### P1 — 数学公式
 
 - **Improved（CR02, CR09, CR10, CR14）**：主 CLI 四格式单一 KaTeX 0.16.22，JS/CSS/20 WOFF2 与 MIT LICENSE 精确 sha256 锁定，由显式 setup 下载/修复，普通转换离线。代码先保护，美元分隔遵循 pandoc 边界，转义美元字面显示；公式在页内以 trust:false/throwOnError:true/strict:error 排版，信任依赖命令拒绝。

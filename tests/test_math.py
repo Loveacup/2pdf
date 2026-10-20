@@ -5,7 +5,7 @@ import pytest
 from pypdf import PdfReader, PdfWriter
 
 from math_rendering import extract_math, source_formula_count, vendor_bytes, katex_manifest
-from md2pdf_chrome import protect_code_spans
+from code_spans import protect_code_spans
 from resource_policy import ResourceError
 from p1_samples import samples
 from test_typesetting import render

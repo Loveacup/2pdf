@@ -13,6 +13,7 @@ import markdown
 from pathlib import Path
 from themes import load_theme, list_themes
 from image_assets import embed_local_images, local_image_check_js
+from code_spans import protect_code_spans, restore_code_spans
 from pdf_delivery import staged_pdf, run_render_process
 from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_html,
                              browser_policy_js, browser_resource_check_js)
@@ -417,9 +418,11 @@ def build_html(md_path, header_text, directives=None, theme="blue", resource_pol
         print(f"Outline:\n{outline}")
 
     md_text = apply_directives(md_text, directives or [])
+    md_text, code_store = protect_code_spans(md_text)
     md_text = preprocess_markdown(md_text)
     # Embed local images as base64 data URIs
     md_text = embed_local_images(md_text, md_path.parent, policy)
+    md_text = restore_code_spans(md_text, code_store)
     body = markdown.markdown(
         md_text,
         extensions=[
@@ -858,7 +861,7 @@ def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, the
     # Escape header_text for JS string (handle quotes and backslashes)
     header_js = escape(header_text, quote=True).replace("\\", "\\\\").replace("'", "\\'")
     pdf_path_js = str(pdf_path).replace("\\", "\\\\").replace("'", "\\'")
-    html_path_js = str(html_path).replace("\\", "\\\\").replace("'", "\\'")
+    html_url_js = json.dumps(html_path.resolve().as_uri())
     pdf_name_js = pdf_path.name.replace("\\", "\\\\").replace("'", "\\'")
 
     # Wait time: give JS time to execute (mermaid needs more)
@@ -871,7 +874,7 @@ def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None, the
         "(async () => {\n",
         "  const browser = await chromium.launch();\n",
         browser_policy_js(html_path),
-        "  await page.goto('file://", html_path_js, "', { waitUntil: 'networkidle' });\n",
+        "  await page.goto(", html_url_js, ", { waitUntil: 'networkidle' });\n",
         "  // Wait for JS pagination engine to run\n",
         "  await page.waitForTimeout(", str(wait_ms), ");\n",
         local_image_check_js(),

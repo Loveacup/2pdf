@@ -7,9 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+from code_spans import protect_code_spans, restore_code_spans  # noqa: E402
 from md2pdf_chrome import (  # noqa: E402
-    protect_code_spans,
-    restore_code_spans,
     preprocess_markdown,
     _normalize_list_indent,
     _parse_mermaid_stat,

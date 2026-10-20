@@ -23,6 +23,7 @@ except ImportError:  # 允许在缺依赖的解释器上仍能跑 --preflight �
 from themes import load_theme, list_themes
 from themes.theme_router import route as route_theme, is_palette, list_palettes
 from image_assets import embed_local_images, local_image_check_js, LocalImageError
+from code_spans import protect_code_spans, restore_code_spans
 from pdf_delivery import staged_pdf, staged_output, run_render_process, DeliveryError
 from resource_policy import (ResourcePolicy, ResourceError, vendor_uri, seal_html,
                              browser_policy_js, browser_resource_check_js)
@@ -184,32 +185,6 @@ def _frontmatter_display_html(frontmatter, properties=False, byline=False):
             html += f'<div class="doc-properties">{cells}</div>'
     return html
 
-
-
-# M1.1 fence-first：文本级转换（==高亮==/wikilink/任务清单/图片内嵌）会污染代码
-# 内容——mermaid 粗箭头 `T1 ==> T2` 曾被高亮正则剥成 `T1 > T2`（2026-07-02 事故）。
-# 因此先把 fenced code block 与行内代码抽成占位符，全部转换完成后再回填。
-_FENCE_RE = re.compile(r"^(?P<f>`{3,}|~{3,})[^\n]*\n(?:.*?\n)?(?P=f)[ \t]*$", re.M | re.S)
-_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)([^`\n]+?)\1(?!`)")
-
-
-def protect_code_spans(md_text):
-    """抽取代码围栏与行内代码为占位符，返回 (text, store)。"""
-    store = []
-
-    def _stash(m):
-        store.append(m.group(0))
-        return f"\x02JZCODE{len(store) - 1}\x03"
-
-    md_text = _FENCE_RE.sub(_stash, md_text)
-    md_text = _INLINE_CODE_RE.sub(_stash, md_text)
-    return md_text, store
-
-
-def restore_code_spans(md_text, store):
-    for i, block in enumerate(store):
-        md_text = md_text.replace(f"\x02JZCODE{i}\x03", block)
-    return md_text
 
 
 # ===== M2 环境自愈：持久 venv + vendor 资源 pin（跨平台，/tmp 不可依赖） =====

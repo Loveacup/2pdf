@@ -91,7 +91,7 @@ def restore_math_html(body, formulas):
 
 def source_formula_count(source):
     # Use the existing fence-first contract rather than a second code parser.
-    from md2pdf_chrome import protect_code_spans
+    from code_spans import protect_code_spans
     protected, _ = protect_code_spans(source)
     return len(extract_math(protected)[1])
 

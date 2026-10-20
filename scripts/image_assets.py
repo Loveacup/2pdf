@@ -31,13 +31,33 @@ def local_image_check_js():
   const imageStatus = await page.evaluate(async () => {
     const errors = [], decoded = [];
     const images = Array.from(document.querySelectorAll('img'));
+    const candidates = Array.from(document.querySelectorAll('[data-jz-local-srcset]'))
+      .flatMap(element => JSON.parse(element.getAttribute('data-jz-local-srcset')));
+    const sources = new Map(candidates.map(candidate => [candidate.uri, candidate.source]));
+    const failed = new Set();
+    const recordError = (source, error) => {
+      if (!failed.has(source)) errors.push({source, reason: String(error)});
+      failed.add(source);
+    };
     await Promise.all(images.map(async img => {
       try {
         await img.decode();
         if (!img.naturalWidth || !img.naturalHeight) throw new Error('empty image');
         decoded.push({width: img.naturalWidth, height: img.naturalHeight});
       } catch (error) {
-        errors.push({ source: img.getAttribute('data-jz-local-source') || img.currentSrc.slice(0, 160), reason: String(error) });
+        recordError(sources.get(img.currentSrc) || img.getAttribute('data-jz-local-source') ||
+                    img.currentSrc.slice(0, 160), error);
+      }
+    }));
+    // Check every authorized candidate, including unselected srcset/picture choices.
+    await Promise.all(candidates.map(async candidate => {
+      const image = new Image();
+      image.src = candidate.uri;
+      try {
+        await image.decode();
+        if (!image.naturalWidth || !image.naturalHeight) throw new Error('empty image');
+      } catch (error) {
+        recordError(candidate.source, error);
       }
     }));
     return {errors, total: images.length, decoded};
