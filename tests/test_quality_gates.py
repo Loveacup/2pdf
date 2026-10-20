@@ -151,3 +151,34 @@ def test_error_bomb_no_false_positive():
         "version 2.0 of the plan",
     ):
         assert not verify_pdf.ERROR_BOMB_RE.search(benign), benign
+
+
+def _verify_with_text(tmp_path, monkeypatch, page_text, source):
+    """以给定的 PDF 提取文本运行 verify()，返回 {check: status}。"""
+    import pypdf
+
+    pdf = tmp_path / "out.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n" + b"0" * 2048)
+    src = tmp_path / "doc.md"
+    src.write_text(source, encoding="utf-8")
+    page = type("Page", (), {"extract_text": lambda self: page_text})()
+    reader = type("Reader", (), {"pages": [page], "metadata": {}})
+    monkeypatch.setattr(pypdf, "PdfReader", lambda _path: reader())
+    result = verify_pdf.verify(pdf, src_md=src)
+    return {c["name"]: c["status"] for c in result["checks"]}
+
+
+def test_error_text_written_in_source_prose_is_not_a_bomb(tmp_path, monkeypatch):
+    """文档正文讨论 Mermaid 报错（如本技能自身文档）时，质量门不得误判而拒绝交付。"""
+    prose = "If Mermaid prints Syntax error in text, fix it. Example: graph TD in a text block.\n"
+    status = _verify_with_text(tmp_path, monkeypatch, prose, prose)
+    assert status["mermaid_bomb"] == "passed"
+    assert status["mermaid_leak"] == "passed"
+
+
+def test_error_text_beyond_source_is_still_caught(tmp_path, monkeypatch):
+    source = "Intro mentions Syntax error once.\n\n```mermaid\nflowchart TD\n  A --> B\n```\n"
+    pdf_text = "Intro mentions Syntax error once.\nSyntax error in text\nmermaid version 11.16.0\nflowchart TD A --> B"
+    status = _verify_with_text(tmp_path, monkeypatch, pdf_text, source)
+    assert status["mermaid_bomb"] == "error"
+    assert status["mermaid_leak"] == "error"

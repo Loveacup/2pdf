@@ -27,6 +27,9 @@ ERROR_BOMB_RE = re.compile(
 )
 
 
+MERMAID_FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})mermaid\b.*?^[ \t]*\1[ \t]*$", re.M | re.S)
+
+
 def _has_frontmatter(md_path):
     try:
         return bool(re.match(r"^---\n", Path(md_path).read_text(encoding="utf-8")))
@@ -72,9 +75,24 @@ def verify(pdf, src_md=None, required_text=()):
         pages = reader.pages
         check("pages", "passed" if pages else "error", f"{len(pages)} 页")
         texts = [unicodedata.normalize("NFKC", p.extract_text() or "") for p in pages]
+        source = None
+        if src_md:
+            try:
+                source = Path(src_md).read_text(encoding="utf-8")
+            except OSError as exc:
+                check("source", "skipped", f"无法读取源文件: {exc}")
+        # 源文正文（非 mermaid 围栏）本身写到的同类文字会合法出现在 PDF 中；只有超出的命中才算泄漏/错误炸弹。
+        visible_source = unicodedata.normalize("NFKC", MERMAID_FENCE_RE.sub("", source)) if source else ""
         for name, pattern in (("mermaid_leak", MERMAID_RE), ("mermaid_bomb", ERROR_BOMB_RE)):
-            hits = [i + 1 for i, text in enumerate(texts) if pattern.search(text)]
-            check(name, "error" if hits else "passed", f"命中页 {hits}" if hits else "未检出")
+            counts = [sum(1 for _ in pattern.finditer(text)) for text in texts]
+            hits = [i + 1 for i, n in enumerate(counts) if n]
+            expected = sum(1 for _ in pattern.finditer(visible_source))
+            if sum(counts) > expected:
+                check(name, "error", f"命中页 {hits}（PDF {sum(counts)} 处，源文正文 {expected} 处）")
+            elif hits:
+                check(name, "passed", f"命中页 {hits} 均对应源文正文同文字（{expected} 处）")
+            else:
+                check(name, "passed", "未检出")
         # No extractable text is a diagnostic, never proof of missing visual content.
         if texts and not texts[0].strip():
             check("first_page", "warn", "首页无可提取文本；纯图/矢量页可合法，须另看页面", False)
@@ -90,13 +108,9 @@ def verify(pdf, src_md=None, required_text=()):
             check("pdf_metadata", "passed" if present else "warn", "源 frontmatter 的 PDF metadata 检查", False)
         expected_diagrams = False
         expected_math = None
-        if src_md:
-            try:
-                source = Path(src_md).read_text(encoding="utf-8")
-                expected_diagrams = bool(re.search(r"^\s*(?:`{3,}|~{3,})mermaid\b", source, re.M))
-                expected_math = source_formula_count(source)
-            except OSError as exc:
-                check("source", "skipped", f"无法读取源文件: {exc}")
+        if source is not None:
+            expected_diagrams = bool(re.search(r"^\s*(?:`{3,}|~{3,})mermaid\b", source, re.M))
+            expected_math = source_formula_count(source)
         total, rendered = meta.get("/JZDiagramTotal"), meta.get("/JZDiagramRendered")
         if total in (None, "") or rendered in (None, ""):
             check("diagram_count", "skipped", "PDF 缺图数 metadata" if expected_diagrams else "源文无 Mermaid 图，无需图数对账", expected_diagrams)
