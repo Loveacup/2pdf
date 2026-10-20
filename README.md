@@ -58,9 +58,12 @@ python scripts/md2pdf_chrome.py report.md output.pdf "报告标题"
 # 智能排版：密集章节缩小字号，尾部变更记录用更小字号
 python scripts/md2pdf_chrome.py doc.md --sm "开发路线图" --xs-after "变更历史"
 
-# 报告 frontmatter 属性卡、署名块与首页/图表页预览
+# 默认显示 frontmatter 笔记信息；可另加署名块与首页/图表页预览
 python scripts/md2pdf_chrome.py report.md output.pdf "报告标题" \
-  --properties --byline --preview ./preview --verify
+  --byline --preview ./preview --verify
+
+# 显式关闭笔记信息卡片（不影响 PDF metadata）
+python scripts/md2pdf_chrome.py report.md output.pdf --no-properties
 
 
 # 初始化已有/缺失环境（健康时复用，不改依赖）

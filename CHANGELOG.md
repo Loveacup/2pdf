@@ -2,6 +2,12 @@
 
 格式：每次行为变更记录 improved / preserved / confirmed，并引用 `references/core-requirements.md` 的 CR ID。
 
+## Unreleased
+
+- **Improved（CR06）**：所有排版格式及 Python 入口默认显示 frontmatter 笔记信息卡；新增显式关闭 `--no-properties`，保留 `--properties`，最后出现的开关生效。无需每次手动补参数。
+- **Preserved（CR08, CR13）**：`--no-metadata` 仅控制 PDF metadata；`--byline` 继续独立控制署名字段。源 Markdown 只读，空值不补造，显式关闭不影响正文。
+- **Confirmed（CR06, CR09）**：新增默认显示、显式关闭及开关顺序的正文行为回归；完整套件 **291 passed**。真实报告未传 `--properties` 即显示信息卡，21 页 A4，图表 3/3；`--verify-strict` 与显式属性文本哨兵检查通过。
+
 ## 2.0.0 — 2026-10-20
 
 ### 终验修复

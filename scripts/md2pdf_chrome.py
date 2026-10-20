@@ -152,7 +152,7 @@ def _display_value(value):
     return str(value)
 
 
-def _frontmatter_display_html(frontmatter, properties=False, byline=False):
+def _frontmatter_display_html(frontmatter, properties=True, byline=False):
     """Build escaped display-only frontmatter blocks beneath the document title."""
     if not frontmatter:
         return ""
@@ -470,7 +470,7 @@ def _page_margin(page_size):
 
 
 def build_html(md_path, header_text, directives=None, theme="auto", page_size="A4",
-               properties=False, byline=False, resource_policy=None):
+               properties=True, byline=False, resource_policy=None):
     md_path = Path(md_path)
     policy = resource_policy or ResourcePolicy(md_path)
     header_text = html_escape(str(header_text), quote=True)
@@ -1394,7 +1394,7 @@ const {{ chromium }} = require('playwright');
 def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
               theme="blue", page_size="A4", browser="playwright",
               fallback=None, write_metadata=True, allow_diagram_errors=False,
-              properties=False, byline=False, verify=False, verify_strict=False,
+              properties=True, byline=False, verify=False, verify_strict=False,
               required_text=(), resource_roots=(), allowed_origins=()):
     target = Path(pdf_path) if pdf_path else Path(md_path).with_suffix(".pdf")
     with staged_pdf(target, md_path, verify, verify_strict, required_text) as staged:
@@ -1407,7 +1407,7 @@ def md_to_pdf(md_path, pdf_path=None, header_text=None, directives=None,
 def _generate_pdf(md_path, pdf_path=None, header_text=None, directives=None,
                   theme="blue", page_size="A4", browser="playwright",
                   fallback=None, write_metadata=True, allow_diagram_errors=False,
-                  properties=False, byline=False, resource_policy=None):
+                  properties=True, byline=False, resource_policy=None):
     md_path = Path(md_path)
     pdf_path = Path(pdf_path) if pdf_path else md_path.with_suffix(".pdf")
     header_text = header_text or md_path.stem
@@ -1692,15 +1692,6 @@ def _render_pandoc_fallback(md_path, pdf_path, theme="auto", page_size="A4"):
 # ===== M2 环境自愈：引导 / 自动 re-exec / --setup =====
 
 
-def _pandoc_install_hint():
-    """按平台给 pandoc 安装提示（M2.4 X6）。"""
-    if sys.platform == "win32":
-        return "winget install pandoc"
-    if sys.platform == "darwin":
-        return "brew install pandoc"
-    return "apt install pandoc"
-
-
 def _bootstrap_venv():
     """建持久 venv 并装依赖（幂等）。成功返回 venv python 路径，失败返回 None。"""
     vp = _venv_python()
@@ -1924,13 +1915,7 @@ def run_setup():
         print("  ❌ 部分离线 vendor 缺失；普通转换不会回退 CDN")
         failures.append("vendor")
 
-    # 4) pandoc（救生艇，warn 级）
-    if shutil.which("pandoc"):
-        print("  ✅ pandoc 就绪")
-    else:
-        print(f"  ⚠️  pandoc 缺失（救生艇不可用）：{_pandoc_install_hint()}")
-
-    # 5) smoke 渲染验收（用 venv python 子进程跑完整链路 + verify）
+    # 4) smoke 渲染验收（用 venv python 子进程跑完整链路 + verify）
     if vp and "browser" not in failures:
         smoke_dir = Path(tempfile.mkdtemp(prefix="jz2pdf_smoke_"))
         smoke_md = smoke_dir / "smoke.md"
@@ -1985,13 +1970,10 @@ def run_preflight(md_path=None, want_format="pdf", as_json=False, browser="playw
         "pip install css_inline（--format wechat 需要）")
     bundled_ok = _bundled_launchable()
     chrome_ok = _find_system_chrome() is not None
-    pandoc_ok = shutil.which("pandoc") is not None
     chk("playwright:bundled", okwarn(bundled_ok),
         "npx playwright install chromium（或 python3 scripts/maintenance.py init）")
     chk("system-chrome", okwarn(chrome_ok),
         "安装 Google Chrome（--browser chrome / auto 第二路需要）")
-    chk("pandoc", okwarn(pandoc_ok),
-        f"{_pandoc_install_hint()}（仅环境信息；排版救生艇已因资源策略停用）")
     if browser == "playwright":
         engine_ok = bundled_ok
         engine_hint = "默认 --browser playwright 需要 bundled Chromium：npx playwright install chromium；或改用 --browser auto/chrome"
@@ -2050,7 +2032,7 @@ CLI_USAGE = (
     "[--format pdf|png|html|wechat] [--browser playwright|chrome|auto] "
     "[--fallback pandoc] [--setup] [--preflight [--json] [--fix]] "
     "[--verify | --verify-strict] [--require-text TEXT] [--allow-diagram-errors] [--no-bootstrap] [--no-metadata] "
-    "[--properties] [--byline] [--preview DIR] "
+    "[--properties | --no-properties] [--byline] [--preview DIR] "
     "[--resource-root DIR] [--allow-origin ORIGIN] "
     "[--theme NAME] [--page-size A4|430x932] [--sm PATTERN] [--xs PATTERN] "
     "[--sm-after PATTERN] [--xs-after PATTERN]"
@@ -2068,7 +2050,7 @@ def parse_cli_args(argv):
     positional = []
     theme = "auto"
     page_size = "A4"
-    properties = False
+    properties = True
     byline = False
     preview = None
     fmt = "pdf"
@@ -2137,6 +2119,9 @@ def parse_cli_args(argv):
             i += 1
         elif arg == "--properties":
             properties = True
+            i += 1
+        elif arg == "--no-properties":
+            properties = False
             i += 1
         elif arg == "--byline":
             byline = True
@@ -2373,7 +2358,7 @@ const {{ chromium }} = require('playwright');
 def md_to_output(md_path, out_path=None, fmt="pdf", header_text=None,
                  directives=None, theme="blue", page_size="A4",
                  browser="playwright", fallback=None, write_metadata=True,
-                 allow_diagram_errors=False, properties=False, byline=False,
+                 allow_diagram_errors=False, properties=True, byline=False,
                  verify=False, verify_strict=False, required_text=(),
                  resource_roots=(), allowed_origins=()):
     """按格式分发。pdf 走原有 md_to_pdf 路径，其余渲染 png/html/wechat。"""

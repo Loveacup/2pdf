@@ -40,6 +40,38 @@ def test_byline_and_properties_render_from_frontmatter(tmp_path):
     assert "tags" in html and "行业 · 研究" in html
 
 
+def test_frontmatter_properties_are_visible_without_export_flags(tmp_path):
+    md = tmp_path / "notes.md"
+    md.write_text(
+        "---\nparticipants: [Summer, AlexCai]\ntags: [品牌经营, 手作]\n---\n"
+        "# 品牌讨论\n\n保留原始正文。\n",
+        encoding="utf-8",
+    )
+    html = m.build_html(md, "品牌讨论")
+    assert '<div class="doc-properties">' in html
+    assert "Summer · AlexCai" in html
+    assert "品牌经营 · 手作" in html
+    assert "保留原始正文。" in html
+
+
+def test_explicit_property_opt_out_changes_card_not_document_content(tmp_path):
+    md = tmp_path / "notes.md"
+    md.write_text(
+        "---\nparticipants: [Summer, AlexCai]\n---\n# 品牌讨论\n\n保留原始正文。\n",
+        encoding="utf-8",
+    )
+    for flags, visible in [
+        ([], True),
+        (["--no-properties"], False),
+        (["--no-properties", "--properties"], True),
+        (["--properties", "--no-properties"], False),
+    ]:
+        args = m.parse_cli_args([str(md), *flags])
+        html = m.build_html(md, "品牌讨论", properties=args["properties"])
+        assert ('<div class="doc-properties">' in html) is visible
+        assert "保留原始正文。" in html
+
+
 def test_emoji_callout_title_does_not_duplicate_builtin_icon():
     rendered = m.convert_callouts("> [!tip] 💡 提醒\n> 内容")
     assert rendered.count("💡") == 1

@@ -154,11 +154,13 @@ Mermaid diagrams in fenced code blocks are automatically rendered:
 
 ## Frontmatter display and preview
 
-The CLI options `--properties`, `--byline`, and `--preview DIR` are defined in the
-parameter reference in `SKILL.md`. The display blocks are derived from the source
-YAML without changing the Markdown file. Byline rows use `author`, `cli`, and
-`models`; the property card omits those fields. `--preview` writes the first page
-and each page containing a named Mermaid chart as 72-dpi PNG files.
+Frontmatter properties are displayed by default in every output format and the
+Python rendering entry points. `--no-properties` explicitly hides the card;
+`--properties` re-enables it, with the last flag taking precedence. `--byline`
+remains separate for `author`, `cli`, and `models`, which the card omits.
+Display blocks derive from source YAML without modifying Markdown; `--no-metadata`
+only controls PDF metadata, not the visible card. `--preview DIR` writes the first
+page and each page containing a named Mermaid chart as 72-dpi PNG files.
 
 ## Mermaid theme colors and chart pagination
 

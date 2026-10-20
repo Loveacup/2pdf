@@ -63,7 +63,7 @@ Avoid relying on legacy automatic bootstrap for installation: when a direct rend
 python scripts/md2pdf_chrome.py <md_file> [pdf_file] [header_text] \
   [--format pdf|png|html|wechat] [--browser playwright|chrome|auto] \
   [--theme NAME] [--page-size A4|430x932] \
-  [--verify | --verify-strict] [--require-text TEXT] [--properties] [--byline] [--preview DIR] \
+  [--verify | --verify-strict] [--require-text TEXT] [--properties | --no-properties] [--byline] [--preview DIR] \
   [--allow-diagram-errors] [--no-metadata] \
   [--resource-root DIR] [--allow-origin ORIGIN] \
   [--sm PATTERN] [--xs PATTERN] [--sm-after PATTERN] [--xs-after PATTERN]
@@ -104,7 +104,7 @@ python scripts/md2pdf_chrome.py report.md out.html --format html --allow-origin 
 | `--no-bootstrap` | Disable the automatic venv self-healing re-exec |
 | `--fallback pandoc` | **Breaking change (P0-B): refuses conversion.** The old pandoc/Chrome CLI path cannot enforce the same request policy. Migrate to `--browser chrome` / `auto`, or initialize bundled Chromium |
 | `--no-metadata` | Skip source frontmatter and diagram/formula-count PDF metadata. Combining with strict verification on diagram/formula documents fails the required count check |
-| `--properties` | Render YAML frontmatter as a title-adjacent property card; list values use `·`, while `author`, `cli`, and `models` remain in the byline |
+| `--properties` / `--no-properties` | YAML frontmatter is shown as a title-adjacent property card **by default**; `--no-properties` explicitly hides it. `--properties` re-enables it; the last flag wins. List values use `·`, while `author`, `cli`, and `models` remain controlled by `--byline`. Source Markdown is unchanged |
 | `--byline` | Render frontmatter `author`, `cli`, and `models` beneath H1 as 撰写 / 协作 CLI / 参与模型 rows; missing fields are omitted |
 | `--preview DIR` | Export page 1 and pages containing named Mermaid charts as 72-dpi PNGs; print their paths |
 | `--resource-root DIR` | Repeatable explicit extra local resource root; default is only the source file's real parent directory. URL-decoded paths and symlinks are checked against real roots |

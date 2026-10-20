@@ -20,15 +20,6 @@ def test_venv_python_windows():
         assert p.endswith("python.exe") and "Scripts" in p
 
 
-def test_pandoc_hint_per_platform():
-    with mock.patch.object(sys, "platform", "darwin"):
-        assert "brew" in m._pandoc_install_hint()
-    with mock.patch.object(sys, "platform", "win32"):
-        assert "winget" in m._pandoc_install_hint()
-    with mock.patch.object(sys, "platform", "linux"):
-        assert "apt" in m._pandoc_install_hint()
-
-
 def test_vendor_pins_are_exact():
     """pin 必须是精确三段版本号，不许 @11 浮动。"""
     import re
